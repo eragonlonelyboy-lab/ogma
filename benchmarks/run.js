@@ -121,6 +121,36 @@ for (const [name, v] of [['validateFact', S.validateFact], ['validateFeature', S
     }
   });
 }
+check('validators never throw on values whose String() throws', () => {
+  // JSON.parse produces this directly: {"id":{"toString":1,"valueOf":2}} has no
+  // callable primitive conversion, so String(v) throws a TypeError. Anything
+  // that interpolates untrusted values into an error string must survive it.
+  const unstringifiable = { toString: 1, valueOf: 2 };
+  const cases = [
+    ['fact.id', S.validateFact, fact({ id: unstringifiable })],
+    ['fact.feature_id', S.validateFact, fact({ feature_id: unstringifiable })],
+    ['fact.classification', S.validateFact, fact({ classification: unstringifiable })],
+    ['feature.id', S.validateFeature, feature({ id: unstringifiable })],
+    ['feature.classification', S.validateFeature, feature({ classification: unstringifiable })],
+    ['module fact_ids', S.validateModuleFile, moduleDoc({ features: [feature({ fact_ids: [unstringifiable] })] })],
+    ['module facts', S.validateModuleFile, moduleDoc({ facts: [fact({ id: unstringifiable })] })],
+    ['ledger.id', S.validateLedgerEntry, { ...cleanLedgerEntry, id: unstringifiable }],
+    ['terrain surface_ids', S.validateTerrain, {
+      surfaces: [{ id: 'app', kind: 'frontend', root: 'src', entry_points: ['src/main.ts'] }],
+      modules: [{ id: 'm', name: 'M', summary: 'S', roots: ['src/m'], surface_ids: [unstringifiable] }]
+    }],
+    ['raised id', S.validateRaised, { raised: [unstringifiable] }]
+  ];
+  for (const [label, v, record] of cases) {
+    try { v(record, []); }
+    catch (e) { throw new Error(`${label} THREW ${e.constructor.name}: ${e.message}`); }
+    assert(errorsOf(v, record).length > 0, `${label} reported nothing`);
+  }
+});
+check('safe() never emits a lone surrogate when it truncates', () => {
+  const out = S.safe('x'.repeat(118) + '\u{1F4A5}', 120);
+  assert(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(out), `lone surrogate in output: ${JSON.stringify(out)}`);
+});
 check('null members in features/facts are reported, not thrown', () => {
   const e = errorsOf(S.validateModuleFile, moduleDoc({ facts: [null, cleanFact], features: [42, cleanFeature] }));
   assert(e.some(x => x.includes('non-object')), 'non-object members not reported: ' + e.join('; '));
@@ -238,9 +268,31 @@ check('end_line must be >= line', () => {
   assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, line: 10, end_line: 5 }).length > 0, 'accepted end<start');
   assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, line: 10, end_line: 20 }).length === 0, 'rejected valid range');
 });
-check('wildcard/regex-shaped symbols rejected', () => {
-  for (const sym of ['.*', '(a+)+', '', 'a'.repeat(300)]) {
-    assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, symbol: sym }).length > 0, `accepted "${sym.slice(0, 20)}"`);
+check('real symbols from mainstream languages are citable (deny-list, not allow-list)', () => {
+  const REAL = [
+    'admin?', 'save!', 'name=',          // Ruby predicate, bang and setter methods
+    '~Destructor', 'operator==', 'operator*', 'operator+', 'operator|', 'operator/',
+    '#privateField',                      // JS/TS private class field
+    'café', '数据', 'Данные',              // legal identifiers in Python, JS, TS, Java, C#, Swift
+    'validateDailyLimit', 'Foo.Bar', 'List<int>', 'std::vector', '$scope'
+  ];
+  for (const sym of REAL) {
+    const e = errorsOf((r, x) => S.validateReceipt(r, x, 't'), { ...R, symbol: sym });
+    assert(e.length === 0, `REJECTED a real symbol: ${sym} — ${e.join('; ')}`);
+  }
+});
+check('unusable symbols rejected, and pattern-shaped ones are inert not banned', () => {
+  for (const sym of ['', '   ', 'a'.repeat(201), 'Valid   ', '  lead',
+                     'a' + String.fromCharCode(27) + 'b', String.fromCharCode(0x202e) + 'x']) {
+    assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, symbol: sym }).length > 0,
+      `accepted ${JSON.stringify(sym.slice(0, 20))}`);
+  }
+  // Matching is a literal word-boundary search, never a compiled RegExp, so a
+  // pattern-shaped symbol is harmless: it fails to match and the receipt
+  // verifier reports a broken citation. Banning these would reject operator*.
+  for (const sym of ['.*', '(a+)+']) {
+    assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, symbol: sym }).length === 0,
+      `banned an inert pattern-shaped symbol: ${sym}`);
   }
 });
 
@@ -478,14 +530,27 @@ check('a path present but structurally broken is caught on a LIVE limit fact', (
 console.log('render filtering:');
 check('rendersTo excludes every non-LIVE fact from business and guide output', () => {
   for (const c of ['DEAD', 'HALF-BUILT', 'UNCLEAR']) {
-    assert(S.rendersTo({ classification: c }, 'prd') === false, `${c} reached prd`);
-    assert(S.rendersTo({ classification: c }, 'guides') === false, `${c} reached guides`);
-    assert(S.rendersTo({ classification: c }, 'tech') === true, `${c} hidden from tech output`);
+    assert(S.rendersTo({ classification: c, status: 'fresh' }, 'prd') === false, `${c} reached prd`);
+    assert(S.rendersTo({ classification: c, status: 'fresh' }, 'guides') === false, `${c} reached guides`);
+    assert(S.rendersTo({ classification: c, status: 'fresh' }, 'tech') === true, `${c} hidden from tech output`);
   }
-  assert(S.rendersTo({ classification: 'LIVE' }, 'prd') === true, 'LIVE excluded from prd');
-  assert(S.rendersTo({ classification: 'BOGUS' }, 'tech') === false, 'unknown classification rendered');
-  assert(S.rendersTo({ classification: 'LIVE' }, 'nonsense') === false, 'unknown audience rendered');
+  assert(S.rendersTo({ classification: 'LIVE', status: 'fresh' }, 'prd') === true, 'LIVE excluded from prd');
+  assert(S.rendersTo({ classification: 'BOGUS', status: 'fresh' }, 'tech') === false, 'unknown classification rendered');
+  assert(S.rendersTo({ classification: 'LIVE', status: 'fresh' }, 'nonsense') === false, 'unknown audience rendered');
   assert(S.rendersTo(null, 'prd') === false, 'null fact rendered');
+});
+check('a stale LIVE fact does not reach business or guide readers', () => {
+  const stale = { classification: 'LIVE', status: 'stale' };
+  assert(S.rendersTo(stale, 'prd') === false, 'a fact the tool marked stale still reached the PRD');
+  assert(S.rendersTo(stale, 'guides') === false, 'a fact the tool marked stale still reached a user guide');
+  assert(S.rendersTo(stale, 'tech') === true, 'engineers should still see it, marked stale');
+  // An absent status must never be read as fresh by default.
+  assert(S.rendersTo({ classification: 'LIVE' }, 'prd') === false, 'a status-less fact defaulted to fresh');
+});
+check('a LIVE fact must declare its freshness', () => {
+  const noStatus = fact({}); delete noStatus.status;
+  assert(errorsOf(S.validateFact, noStatus).some(x => x.includes('status')),
+    'a LIVE fact with no status passed — rendersTo depends on this field');
 });
 
 // ---- the out/ file contract -----------------------------------------------
@@ -520,7 +585,7 @@ check('outDocuments never throws on hostile terrain and skips unusable ids', () 
   }
 });
 check('isSafeOutPath refuses traversal and absolute destinations', () => {
-  for (const p of ['../x.md', '/etc/x.md', 'tech/../../x.md', 'x.md ', 'tech/x.txt', '']) {
+  for (const p of ['../x.md', '/etc/x.md', 'tech/../../x.md', 'x.md ', 'tech/x.txt', '', 'x.md' + String.fromCharCode(0)]) {
     assert(S.isSafeOutPath(p) === false, `accepted out path ${JSON.stringify(p)}`);
   }
 });
@@ -550,6 +615,26 @@ check('line endings and surrounding whitespace are canonicalized away', () => {
   const crlf = { ...EX_A, code: EX_A.code.replace(/\n/g, '\r\n') };
   assert(S.witnessInputHash('S', [EX_A]) === S.witnessInputHash('S', [crlf]), 'CRLF changed the hash');
   assert(S.witnessInputHash('S', [EX_A]) === S.witnessInputHash('  S \n', [EX_A]), 'statement padding changed the hash');
+});
+check('witnessInputHash is INJECTIVE — no two different inputs share a digest', () => {
+  // The separator-forging attack: repo source content is attacker-controlled,
+  // so if components are joined by a bare separator with no length prefix, a
+  // planted file can make one evidence set hash identically to another.
+  const A = { file: 'src/a.ts', line: 1, end_line: 1, code: 'const a = 1;' };
+  const Bx = { file: 'src/b.ts', line: 3, end_line: 3, code: 'const b = 2;' };
+  const forged = { ...A, code: A.code + '\n--\nsrc/b.ts:3-3\nconst b = 2;' };
+  assert(S.witnessInputHash('S', [A, Bx]) !== S.witnessInputHash('S', [forged]),
+    'two different excerpt sets collide — a ruling validates against evidence it was never bound to');
+  // Statement side: a statement must not be able to absorb an excerpt block.
+  assert(S.witnessInputHash('S', [A, Bx]) !== S.witnessInputHash('S\n--\nsrc/a.ts:1-1\nconst a = 1;', [Bx]),
+    'a statement absorbed an excerpt block and kept the digest');
+  // Count must matter too: one block cannot pose as two.
+  assert(S.witnessInputHash('S', [A]) !== S.witnessInputHash('S', [A, { ...A, file: 'src/c.ts' }]),
+    'excerpt count does not affect the digest');
+});
+check('the witness hash version tag is inside the digest', () => {
+  assert(S.WITNESS_HASH_VERSION === 'ogma-witness-v2',
+    `version tag not bumped after the canonical form changed: ${S.WITNESS_HASH_VERSION}`);
 });
 check('witnessInputHash refuses unusable input instead of hashing junk', () => {
   for (const bad of [[null, [EX_A]], ['S', []], ['S', null], ['S', [{ file: 'x', line: 0, code: 'c' }]], ['', [EX_A]]]) {
@@ -652,7 +737,7 @@ check('re-init preserves an existing ledger even when config.json is missing', (
   const dir = tmpdir();
   cmdInit(dir, quiet);
   const ledgerPath = path.join(dir, '.ogma/ogham/ledger.json');
-  fs.writeFileSync(ledgerPath, JSON.stringify({ questions: [{ id: 'Q-1' }] }));
+  fs.writeFileSync(ledgerPath, JSON.stringify({ questions: [cleanLedgerEntry] }));
   fs.unlinkSync(path.join(dir, '.ogma/config.json')); // the gitignored-config clone case
   assert(cmdInit(dir, quiet) === 0, 're-init failed');
   const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
@@ -722,6 +807,42 @@ check('init refuses an oversized config.json without reading it into memory', ()
   const msgs = [];
   assert(cmdInit(dir, m => msgs.push(m)) === 1, 'accepted an oversized settings file');
   assert(msgs.join(' ').includes('limit'), 'refused without naming the limit: ' + msgs.join(' | '));
+});
+check('init refuses a repo-supplied config that grants its own delivery consent', () => {
+  // The realistic attack uses an ALLOWLISTED kind and sets asked:true, the flag
+  // meaning a human already answered. A test using an invalid kind proves the
+  // allowlist works, not that the threat is stopped.
+  for (const dest of [{ kind: 'confluence', asked: true }, { kind: 'markdown-only', asked: false },
+                      { kind: null, asked: true }]) {
+    const dir = tmpdir();
+    cmdInit(dir, quiet);
+    fs.writeFileSync(path.join(dir, '.ogma/config.json'),
+      JSON.stringify({ ...S.defaultConfig('p'), destination: dest }));
+    const msgs = [];
+    assert(cmdInit(dir, m => msgs.push(m)) === 1,
+      `adopted a repo-supplied destination ${JSON.stringify(dest)} and reported success`);
+    assert(msgs.join(' ').includes('destination'), 'refused without naming the reason: ' + msgs.join(' | '));
+  }
+});
+check('init still accepts a config whose destination has not been chosen', () => {
+  const dir = tmpdir();
+  cmdInit(dir, quiet);
+  assert(cmdInit(dir, quiet) === 0, 'refused the config it wrote itself');
+});
+check('init refuses a corrupt or wrong-shaped ledger instead of reporting it healthy', () => {
+  // None of these need an attacker: an interrupted write, a disk-full, an
+  // unresolved merge conflict, an editor crash.
+  for (const [label, body] of [['empty', ''], ['truncated', '{"questions":['],
+                               ['merge conflict', '<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> x'],
+                               ['wrong shape', '[]'], ['questions not an array', '{"questions":{}}'],
+                               ['invalid entry', '{"questions":[{"id":"Q 1"}]}']]) {
+    const dir = tmpdir();
+    cmdInit(dir, quiet);
+    fs.writeFileSync(path.join(dir, '.ogma/ogham/ledger.json'), body);
+    const msgs = [];
+    assert(cmdInit(dir, m => msgs.push(m)) === 1, `reported a ${label} ledger as healthy`);
+    assert(msgs.join(' ').includes('ledger'), `refused a ${label} ledger without naming it: ` + msgs.join(' | '));
+  }
 });
 check('init refuses an unparseable config.json rather than reporting initialized', () => {
   const dir = tmpdir();

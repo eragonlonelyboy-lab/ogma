@@ -1,0 +1,51 @@
+{
+  "artifact": "OGMA Batch 0 — foundation",
+  "round": 4,
+  "reviewed_at": "2026-08-05",
+  "commit": "9f56da6",
+  "panel": "5 blind critics vs frozen tree 9f56da6 — all five reported, all ran the code",
+  "verdict": "FAIL",
+  "confidence": 0.85,
+  "perLens": [
+    { "lens": "security",    "score": 4,   "bar": 8, "blocking": 2, "margin": -4,   "pass": false },
+    { "lens": "spec",        "score": 5,   "bar": 8, "blocking": 11, "margin": -3,  "pass": false },
+    { "lens": "correctness", "score": 5,   "bar": 8, "blocking": 4, "margin": -3,   "pass": false },
+    { "lens": "edge-cases",  "score": 5,   "bar": 8, "blocking": 4, "margin": -3,   "pass": false },
+    { "lens": "code",        "score": 6.5, "bar": 8, "blocking": 6, "margin": -1.5, "pass": false }
+  ],
+  "trajectory": "round3 (tree 18286de): edge 5, spec 6, correctness 6, code 7, security 7. round4 (tree 9f56da6): security 4, spec 5, correctness 5, edge 5, code 6.5. NOT AN IMPROVEMENT. Scores are not strictly comparable across rounds (different critics, and this round's panel ran mutation testing and live exploit probes rather than reading), but the honest read is that fixing 14 findings introduced at least 3 new defects and security regressed hardest, on code the maker wrote this session.",
+  "method_note": "This round the maker changed method to write-the-check-before-the-rule: 27 bench checks were authored first and confirmed failing against 18286de before any fix. Bench went 83 -> 117 green. The panel found that method necessary but not sufficient — the maker still authored BOTH the rule and its check, and three of the new checks pass for the wrong reason or never execute.",
+  "convergent_findings": [
+    "witnessInputHash is not injective — THREE lenses independently produced a collision. The canonical form joins statement and code blocks with an unescaped, unlength-prefixed '\\n--\\n'; repo-shipped source text can forge a block boundary so one evidence set hashes identically to another. Defeats the field's entire stated purpose (anti-reuse after statement or code changed). Maker-introduced this session.",
+    "cutoff_commit is defined as a floor at schema doc :48 and required to equal HEAD at :254 via oghamIsBound — THREE lenses. Mutually exclusive after the first commit: hold the floor and the certificate becomes permanently unobtainable; advance it to HEAD and the floor is decorative and the stale-Ogham hole reopens. Maker-introduced this session.",
+    "The hostile-config defense stops an unknown destination kind but not an ALLOWLISTED kind with asked:true (the flag meaning a human already consented) — TWO lenses. The bench check that appears to cover this uses an invalid kind, so it proves the allowlist works, not that the threat is stopped. Maker-introduced this session.",
+    "Test-suite quality — TWO lenses, one via 30 single-edit mutations (22 caught, 8 not). The symlinked-ledger check returns early and still reports ok on any machine without file-symlink privilege, which is this one. The witness-provenance check passes for the wrong reason: deleting both rules it names leaves the suite green. The out-contract fixture is a terrain shape validateTerrain rejects with 8 errors, so the contract is verified only against input that cannot legally exist."
+  ],
+  "blocking_findings": [
+    "safe() throws TypeError on JSON-reachable input: an id-shaped field that is an object with non-callable toString/valueOf breaks the file's headline never-throw contract at six unguarded call sites. Maker-introduced this session.",
+    "SYMBOL_SHAPE is an ASCII allow-list — the identical defect class the maker spent this session fixing on the path axis, left untreated ten lines away. Rejects admin?, save!, name=, ~Destructor, operator==, #privateField, and every non-ASCII identifier, so those facts cannot enter the Ogham at all.",
+    "rendersTo ignores status, so a LIVE fact the tool itself marked stale renders to business and guide readers with no marker — the exact window watch exists to manage.",
+    "A DEAD fact may carry a REFUTED or UNSUPPORTED ruling with no ledger_refs: the refutation and the open question both vanish while the statement renders to engineers as settled.",
+    "init validates config.json but not ledger.json: a 0-byte, unparseable, or wrong-shaped ledger returns exit 0 and 'nothing touched', against its own comment that the ledger holds hand-curated human judgment. All three arise without an attacker.",
+    "Fact and feature id are ungoverned (presence only, 4000 chars): '../../etc/passwd' is accepted, while the same grammar is enforced today on raised.json and terrain ids and guarded in outDocuments.",
+    "The fact-ID annotation syntax rendered into documents is never specified, yet three gate checks must parse, strip, or exclude it — the same unbuildable-contract class the maker closed for input_hash and did not close here.",
+    "witnessInputHash pins how the digest is computed and leaves how excerpts are DERIVED undefined (which receipts contribute, whether the drift window widens the range, which commit the code is read at), so the gate cannot reproduce it byte-for-byte.",
+    "No gate check reconciles facts/*.json against terrain.modules in either direction: a module in terrain with no facts file renders an empty document that exists, so coverage passes. This is the product's self-named worst failure mode, guarded for path shapes and not for modules.",
+    "coverage's pass condition is stated twice incompatibly (file-existence at :216 vs per-module content at :238) and readability's population is stated two ways inside one sentence, with no syllable rule pinned against a hard threshold.",
+    "The seeded-false-statement catch rate — the spec's own named cheapest test for its riskiest assumption — appears in no batch of the benchmark plan, while README.md states it as a property that already holds.",
+    "benchmarks/run.js contains a literal NUL byte from a test fixture, making the file binary to ripgrep and similar tooling. Maker-introduced this session."
+  ],
+  "held_up": [
+    "The path deny-list, tested in both directions. One lens threw 47 additional real-world paths at it (Remix, Nuxt, Rails, Android resource dirs, xcassets, gopkg.in, ZWJ emoji dirs, NFC/NFD, a 4096-char path) — all 47 citable; every dangerous shape rejected. Named by three lenses as better than most shipped code.",
+    "Numeric boundaries exactly at and one past every declared cap, all correct.",
+    "Hostile shapes never throw, except through safe() (see blocking): null-prototype docs, __proto__ via JSON.parse, self-referential objects, 5000-deep nesting, 1e6 sparse arrays all reported cleanly.",
+    "worstClassification's double guard is real: weakening the membership check to a lookup, the null-prototype SEVERITY still held.",
+    "init's filesystem posture: junction and symlink redirection refused at every level with zero writes into the link target; O_EXCL on both writes; hardlinked ledger pointing outside the repo not clobbered; size cap checked from stat before reading; five consecutive runs byte-identical; partial trees repaired correctly.",
+    "No prototype pollution found. No catastrophic backtracking. No secrets, no network, no deserialization sink beyond a size-capped JSON.parse.",
+    "git argv injection rejected at every commit-ish field. sameCommit's abbreviation-aware equality is correct and symmetric.",
+    "The bidirectional feature-fact link, worst-of-facts rollup, and narration policy could not be broken by any lens.",
+    "Honest stubs: build status is handler presence, unbuilt powers exit 1 naming their batch.",
+    "22 of 30 single-edit mutations were caught, several naming the actual defect."
+  ],
+  "recommendation_to_decider": "Four rounds, one recurring cause: the maker authors both the rule and the check that proves it. Round 4 changed the ORDER (check first) and the cause survived, because authorship did not change. Recommend the next round separate them — the blockers here are code-backed and unambiguous enough to be fixed against, but the checks that certify the fixes should not be written by whoever writes the fixes."
+}

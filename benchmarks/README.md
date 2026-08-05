@@ -19,6 +19,12 @@ Runner: `benchmarks/run.js` (`npm test`). Grows with each batch; hardens at ship
 - **Hostile-input bench** — LIVE (Batch 0): validators report and never throw;
   error output is capped; attacker text never reaches a terminal unescaped;
   `init` refuses symlinked components and an invalid or unparseable config.
+- **Witness catch-rate bench** — planned (Batch 3, blocks ship): the spec names
+  this as the cheapest test of the product's riskiest assumption, and it was
+  missing from this plan while README.md described it as already measured. Seed
+  N statements known to be false, each with a valid receipt, into a fixture
+  Ogham; run the witness pass; publish the catch rate with the release. A poor
+  catch rate is a publishable result, not a reason to withhold the number.
 - **Receipt verifier bench** — planned (Batch 2): planted fake citations (wrong
   file, wrong line beyond drift window, absent symbol) are all rejected; valid
   citations pass.
