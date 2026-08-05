@@ -142,6 +142,43 @@ check('dot segments rejected (path-identity ambiguity)', () => {
   assert(S.isSafeRepoPath('./src/a.ts') === false, 'accepted ./x');
   assert(S.isSafeRepoPath('.') === false, 'accepted .');
 });
+check('git-argv and pathspec shapes rejected in receipt paths', () => {
+  for (const p of ['-o', '-o/x.ts', ':(exclude)src', ':x', 'src/-rf.ts', 'a b/c.ts']) {
+    assert(S.isSafeRepoPath(p) === false, `accepted ${p}`);
+  }
+});
+check('citations into .git and .ogma rejected', () => {
+  assert(S.isSafeRepoPath('.git/config') === false, 'accepted .git');
+  assert(S.isSafeRepoPath('.ogma/config.json') === false, 'accepted .ogma');
+  assert(S.isSafeRepoPath('src/.gitkeep') === true, 'rejected legitimate dotfile');
+});
+check('commit-ish fields must be hex (git argv injection)', () => {
+  assert(S.isCommitish('a1b2c3d') === true, 'rejected valid short sha');
+  for (const c of ['--output=/tmp/pwn', 'HEAD', 'a1b2c3d --output=x', '', 'zzzzzzz']) {
+    assert(S.isCommitish(c) === false, `accepted ${c}`);
+  }
+  assert(errorsOf(S.validateFact, fact({ witness: { ...cleanFact.witness, checked_at_commit: '--output=/tmp/pwn' } })).length > 0,
+    'validator accepted option-shaped commit');
+  assert(errorsOf(S.validateFact, fact({ verified_at_commit: '--output=/tmp/pwn' })).length > 0,
+    'validator accepted option-shaped verified_at_commit');
+});
+check('worstClassification fails closed on prototype keys', () => {
+  for (const k of ['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty']) {
+    let threw = false;
+    try { S.worstClassification([k]); } catch { threw = true; }
+    assert(threw, `"${k}" ranked as a classification instead of throwing`);
+  }
+});
+check('hostile module file caps error output instead of amplifying', () => {
+  const features = [], facts = [];
+  for (let i = 0; i < 400; i++) {
+    features.push(feature({ id: `FEAT-${i}`, fact_ids: Array.from({ length: 50 }, (_, j) => `GHOST-${i}-${j}`) }));
+  }
+  const e = [];
+  S.validateModuleFile({ module: 'm', features, facts }, e);
+  assert(e.length <= S.MAX_ERRORS + 1, `collected ${e.length} errors, cap is ${S.MAX_ERRORS}`);
+  assert(e[e.length - 1].includes('suppressed'), 'no suppression notice');
+});
 check('hyphenated project names survive defaultConfig and validate', () => {
   const cfg = S.defaultConfig('my-app');
   assert(cfg.project === 'my-app', `hyphen mangled: ${cfg.project}`);

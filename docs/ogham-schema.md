@@ -127,10 +127,10 @@ Field rules (all enforced by `lib/schema.js` unless marked gate):
 { "file": "src/payments/service.ts", "line": 88, "end_line": 95, "symbol": "validateDailyLimit" }
 ```
 
-- `file` — contained repo-relative POSIX path (validator rejects `..`, absolute, backslash, drive letter, NUL, >4096 chars)
+- `file` — contained, shaped, repo-relative POSIX path. The validator rejects `.`/`..`/empty segments, absolute, backslash, drive letter, NUL, >4096 chars, **any segment not matching `[A-Za-z0-9._][A-Za-z0-9._-]*`** (which excludes an option-position leading `-` and git pathspec magic such as `:(exclude)`), and **any path rooted at `.git` or `.ogma`** — a citation may never point at version control or OGMA's own state.
 - `line` — 1-indexed, `end_line` optional (≥ line); the receipt's **range** is `[line, end_line ?? line]`
 - `symbol` — identifier-shaped, ≤200 chars (validator-enforced shape)
-- **Verification (zero-LLM):** read `git show <verified_at_commit>:<file>` — never the working tree, so a dirty tree cannot fake or break a receipt. The symbol must appear as a **literal word-boundary match** (never a constructed RegExp from data) within the range widened by ±`RECEIPT_DRIFT_WINDOW` (5 — an untested default, tuned when Batch 2 lands).
+- **Verification (zero-LLM):** read `git show <verified_at_commit>:<file>` — never the working tree, so a dirty tree cannot fake or break a receipt. Every commit-ish field (`verified_at_commit`, `witness.checked_at_commit`, `manifest.cutoff_commit`) is validated as hex `[0-9a-f]{7,64}` **because it reaches git's argv**: an unvalidated value like `--output=<path>` would sit in an option position and let git create or truncate a file. Readers must additionally pass `--end-of-options` and never place data-derived strings in option positions. The symbol must appear as a **literal word-boundary match** (never a constructed RegExp from data) within the range widened by ±`RECEIPT_DRIFT_WINDOW` (5 — an untested default, tuned when Batch 2 lands).
 - **Invalidation (watch):** a commit touching `file` within the widened range marks the fact `stale`.
 - Known false-positive risk, stated: a short symbol can word-boundary-match an unrelated occurrence in the window. The witness pass is the backstop; the bench measures it.
 
@@ -252,3 +252,4 @@ Process rules (not machine-checkable in one snapshot, stated as discipline): wat
 - Symbol matching is structural (word-boundary text match), not semantic; tree-sitter indexing in Batch 2 narrows but does not eliminate false positives.
 - "Local-first" means: OGMA's CLI is local and never calls a model, and the Ogham never leaves the machine. The *reading* is done by whatever host agent the user runs — if that agent is a hosted model, code goes wherever that agent sends it. OGMA adds no network calls of its own.
 - Cross-audience consistency means every audience **cites the same facts and the same code** — renderers cannot introduce a claim without a fact ID. It does not mean the three prose retellings are semantically compared to each other.
+- Path containment is enforced on the **string**. A path with no `..` can still be an in-repo symlink pointing outside; reading only through `git show <commit>:<file>` avoids this. Any future reader that touches the working tree must `realpath` and prefix-check against `repo_root` instead of trusting the string.
