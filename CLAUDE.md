@@ -15,16 +15,19 @@ works and the benchmark passes; until then everything here is local.
    never simulates output. A power is built when its `handler` lands in the
    `POWERS` table — there is no separate flag to flip early.
 3b. **Witness rulings come only from the skill layer.** The CLI enforces their
-   presence, verdict, and freshness; it never writes one. A fact whose ruling
-   is not CONFIRMED at its verified commit does not render.
+   presence, verdict, and freshness; it never writes one. Every fact carries a
+   ruling; a LIVE fact's ruling is CONFIRMED at its verified commit. Anything
+   less demotes the fact rather than rendering.
 4. **No third-party tools or client projects in this repo.** No tool names, no
    client names — in code, comments, docs, or fixtures. Benchmarks run against
    public open-source fixture repos only.
 5. **Renderers read the Ogham, never the repo.** If a renderer needs something
    that is not in the Ogham, the fix is in ingest, not a side-channel read.
-6. **Classification discipline.** DEAD facts never reach business or guide
-   output. HALF-BUILT and UNCLEAR always carry a ledger reference. The gate
-   re-checks both; so should you before committing.
+6. **Classification discipline.** Business and guide output carries LIVE facts
+   only — DEAD, HALF-BUILT and UNCLEAR are all excluded, and `rendersTo()` is
+   the single rule, never a paragraph. Only `tech` output shows the doubt.
+   HALF-BUILT and UNCLEAR always carry a ledger reference. The gate re-checks
+   both; so should you before committing.
 7. **Watch never renumbers.** Fact and feature IDs are stable across refreshes;
    watch updates in place.
 

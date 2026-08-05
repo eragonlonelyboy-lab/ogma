@@ -31,9 +31,12 @@ business readers), **HALF-BUILT** (partially wired — ledger, never narrated as
 working), or **UNCLEAR** (ledger, with the specific question).
 
 Nothing is "done" until `ogma gate` passes nine deterministic checks and emits
-a certificate — including that every fact holds a fresh CONFIRMED witness
-ruling. When the code moves, `ogma watch` invalidates only the receipts the
-diff touched and refreshes only those facts — then re-certifies.
+a certificate — including that every fact holds a witness ruling and every
+**LIVE** fact holds a fresh CONFIRMED one. A non-confirmed ruling demotes its
+fact into the ledger; that is a legal, certifiable end state, not a failure.
+The gate also refuses to certify an Ogham that is not bound to the repository's
+current HEAD. When the code moves, `ogma watch` invalidates only the receipts
+the diff touched and refreshes only those facts — then re-certifies.
 
 ## The contract with the host agent
 

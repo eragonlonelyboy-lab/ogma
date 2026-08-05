@@ -3,13 +3,26 @@
 Runner: `benchmarks/run.js` (`npm test`). Grows with each batch; hardens at ship (Batch 8).
 
 - **Schema bench** — LIVE (Batch 0): validators reject every planted violation
-  class (missing receipt, bad classification, empty does/happens/sees,
-  unledgered HALF-BUILT, ghost references, duplicate IDs, wrong worst-of-facts)
-  and accept the clean fixtures.
+  class (missing receipt, missing or stale witness ruling, bad classification,
+  empty does/happens/sees, unledgered HALF-BUILT, ghost references, duplicate
+  IDs, wrong worst-of-facts) and accept the clean fixtures.
+- **Path bench** — LIVE (Batch 0), both directions: real framework paths
+  (Next.js route groups and dynamic segments, SvelteKit `+page`, scoped
+  packages, spaces, non-ASCII) must be **citable**, and dangerous shapes
+  (traversal, absolute, UNC, drive letter, control bytes, bidi overrides, git
+  pathspec magic, `.git`/`.ogma` at any depth in any case) must be **rejected**.
+  A path rule that only tests the reject side is how whole ecosystems go
+  silently undocumented under a passing certificate.
+- **Contract bench** — LIVE (Batch 0): the `out/` document set, the witness
+  input-hash canonical form, and commit-identity/HEAD-binding helpers behave as
+  the schema doc specifies, so Batch 5 wires tested functions rather than prose.
+- **Hostile-input bench** — LIVE (Batch 0): validators report and never throw;
+  error output is capped; attacker text never reaches a terminal unescaped;
+  `init` refuses symlinked components and an invalid or unparseable config.
 - **Receipt verifier bench** — planned (Batch 2): planted fake citations (wrong
   file, wrong line beyond drift window, absent symbol) are all rejected; valid
   citations pass.
-- **Gate bench** — planned (Batch 5): each of the seven checks fails on a
+- **Gate bench** — planned (Batch 5): each of the nine checks fails on a
   fixture built to violate exactly that check, and passes on the clean fixture.
 - **End-to-end fixture** — planned (Batch 8): a small public open-source repo;
   the full pipeline runs and the emitted certificate is published with the

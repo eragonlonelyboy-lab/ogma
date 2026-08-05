@@ -15,6 +15,15 @@ const { cmdInit } = require('../lib/init');
 
 let pass = 0, fail = 0;
 
+// Every temp dir the bench makes is registered here and removed at the end.
+// A test harness that litters the machine is a defect in the harness.
+const TEMPS = [];
+function tmpdir() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ogma-bench-'));
+  TEMPS.push(d);
+  return d;
+}
+
 function check(name, fn) {
   try { fn(); pass++; console.log(`  ok    ${name}`); }
   catch (e) { fail++; console.error(`  FAIL  ${name} — ${e.message}`); }
@@ -143,14 +152,50 @@ check('dot segments rejected (path-identity ambiguity)', () => {
   assert(S.isSafeRepoPath('.') === false, 'accepted .');
 });
 check('git-argv and pathspec shapes rejected in receipt paths', () => {
-  for (const p of ['-o', '-o/x.ts', ':(exclude)src', ':x', 'src/-rf.ts', 'a b/c.ts']) {
+  for (const p of ['-o', '-o/x.ts', ':(exclude)src', ':x', 'src/-rf.ts']) {
     assert(S.isSafeRepoPath(p) === false, `accepted ${p}`);
   }
 });
-check('citations into .git and .ogma rejected', () => {
-  assert(S.isSafeRepoPath('.git/config') === false, 'accepted .git');
-  assert(S.isSafeRepoPath('.ogma/config.json') === false, 'accepted .ogma');
+check('citations into .git and .ogma rejected at ANY depth, any case', () => {
+  for (const p of ['.git/config', '.ogma/config.json', '.GIT/config', '.Ogma/x.json',
+                   'vendor/sub/.git/config', 'a/.OGMA/certificate.json']) {
+    assert(S.isSafeRepoPath(p) === false, `accepted ${p}`);
+  }
   assert(S.isSafeRepoPath('src/.gitkeep') === true, 'rejected legitimate dotfile');
+  assert(S.isSafeRepoPath('src/gitignore.ts') === true, 'rejected legitimate name containing git');
+});
+check('real framework paths are citable (deny-list, not allow-list)', () => {
+  const REAL = [
+    'app/[id]/page.tsx',                    // Next.js dynamic route
+    'app/[...slug]/route.ts',               // Next.js catch-all
+    'app/(marketing)/layout.tsx',           // Next.js route group
+    'src/routes/+page.svelte',              // SvelteKit
+    'src/routes/[slug=int]/+page.server.ts',
+    'packages/@acme/core/src/index.ts',     // scoped monorepo package
+    'src/My Documents/report.ts',           // space in a directory name
+    'src/café/naïve.ts',                    // non-ASCII latin
+    'src/文档/入口.ts',                      // non-ASCII CJK
+    'apps/web/src/components/Button.test.tsx',
+    'Makefile',
+    'src/a~b.ts', 'src/a,b.ts', 'src/a=b.ts', 'src/a!b.ts', 'src/a@b.ts', 'src/a+b.ts',
+    'src/a&b.ts', 'src/a%b.ts', 'src/a#b.ts', "src/a'b.ts", 'src/a{b}.ts', 'src/a^b.ts'
+  ];
+  for (const p of REAL) {
+    assert(S.isSafeRepoPath(p) === true, `REJECTED a real citable path: ${p}`);
+  }
+});
+check('dangerous shapes still rejected under the deny-list', () => {
+  const BAD = [
+    '', 'a/', '/a', 'a//b', 'a/./b', 'a/../b', '../x', 'C:/x', '//server/share/x',
+    'src/a\u0000.ts', 'src/a\u0001b.ts', 'src/a\u007f.ts',
+    'src/a\u202eb.ts',                       // right-to-left override: path spoofing
+    'src/a<b.ts', 'src/a>b.ts', 'src/a|b.ts', 'src/a?b.ts', 'src/a*b.ts', 'src/a"b.ts',
+    'src/a:b.ts',                            // win32-illegal + git pathspec magic
+    'src/trailing. /x.ts', 'src/trailing./x.ts', 'src/trailing /x.ts'
+  ];
+  for (const p of BAD) {
+    assert(S.isSafeRepoPath(p) === false, `ACCEPTED a dangerous path: ${JSON.stringify(p)}`);
+  }
 });
 check('commit-ish fields must be hex (git argv injection)', () => {
   assert(S.isCommitish('a1b2c3d') === true, 'rejected valid short sha');
@@ -352,12 +397,250 @@ check('bad readability_max_grade rejected', () => {
 check('non-array leaklint_extra rejected', () =>
   assert(errorsOf(S.validateConfig, { ...S.defaultConfig('t'), leaklint_extra: 'nope' }).length > 0, 'accepted string'));
 
+// ---- commit identity: freshness and head binding --------------------------
+
+console.log('commit identity:');
+check('sameCommit accepts prefix forms of one commit, rejects different ones', () => {
+  const long = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  assert(S.sameCommit('a1b2c3d', long) === true, 'short prefix of the same commit rejected');
+  assert(S.sameCommit(long, 'a1b2c3d') === true, 'argument order matters');
+  assert(S.sameCommit(long, long) === true, 'identical rejected');
+  assert(S.sameCommit('a1b2c3d', 'a1b2c3e') === false, 'different commits accepted');
+  assert(S.sameCommit('a1b2c3', 'a1b2c3d') === false, 'accepted an under-length id');
+  assert(S.sameCommit('HEAD', 'a1b2c3d') === false, 'accepted a non-hex ref');
+  assert(S.sameCommit(null, undefined) === false, 'accepted nullish');
+});
+check('witness freshness is ENFORCED, not just documented', () => {
+  const stale = fact({
+    verified_at_commit: 'a1b2c3d',
+    witness: { ...cleanFact.witness, checked_at_commit: 'f9e8d7c' }
+  });
+  assert(errorsOf(S.validateFact, stale).some(x => /fresh|checked_at_commit/.test(x)),
+    'a ruling made at a different commit than the fact was verified at passed');
+  const okLong = fact({
+    verified_at_commit: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+    witness: { ...cleanFact.witness, checked_at_commit: 'a1b2c3d' }
+  });
+  assert(errorsOf(S.validateFact, okLong).length === 0, 'rejected a valid prefix-form pair');
+});
+check('a LIVE fact must carry a CONFIRMED ruling (law 2, made mechanical)', () => {
+  const noWitness = fact({}); delete noWitness.witness;
+  assert(errorsOf(S.validateFact, noWitness).some(x => x.includes('witness')),
+    'LIVE fact with no witness ruling passed');
+  const refuted = fact({ witness: { ...cleanFact.witness, verdict: 'REFUTED' } });
+  assert(errorsOf(S.validateFact, refuted).some(x => /CONFIRMED/.test(x)),
+    'LIVE fact carrying a REFUTED ruling passed');
+  const noCommit = fact({}); delete noCommit.verified_at_commit;
+  assert(errorsOf(S.validateFact, noCommit).some(x => x.includes('verified_at_commit')),
+    'LIVE fact with no verified_at_commit passed');
+});
+check('every fact carries a ruling, LIVE or not', () => {
+  const unwitnessed = fact({ classification: 'DEAD' });
+  delete unwitnessed.witness;
+  delete unwitnessed.path;
+  assert(errorsOf(S.validateFact, unwitnessed).some(x => x.includes('witness')),
+    'a fact with no ruling at all entered the Ogham');
+});
+check('non-LIVE facts keep their last ruling without needing CONFIRMED', () => {
+  const demoted = fact({
+    classification: 'UNCLEAR', ledger_refs: ['Q-1'],
+    witness: { ...cleanFact.witness, verdict: 'UNSUPPORTED' }
+  });
+  delete demoted.path;
+  const e = errorsOf(S.validateFact, demoted);
+  assert(e.length === 0, 'the documented demotion end state was rejected: ' + e.join('; '));
+});
+check('oghamIsBound refuses to certify an Ogham that is not at repo HEAD', () => {
+  assert(S.oghamIsBound('a1b2c3d', 'a1b2c3d4e5f6') === true, 'same commit reported unbound');
+  assert(S.oghamIsBound('a1b2c3d', 'f9e8d7c') === false, 'a stale Ogham reported bound');
+  assert(S.oghamIsBound(undefined, 'a1b2c3d') === false, 'missing cutoff reported bound');
+});
+
+// ---- path receipts on every fact, not only LIVE ---------------------------
+
+console.log('path validation scope:');
+check('a malformed path is caught on non-LIVE facts too', () => {
+  const bad = fact({
+    classification: 'DEAD',
+    path: { entry: 'e', exit: 'x', chain: [{ hop: 'h', receipt: { file: '../../etc/passwd', line: 1, symbol: 'x' } }] },
+    witness: { ...cleanFact.witness, verdict: 'REFUTED' }
+  });
+  const e = errorsOf(S.validateFact, bad);
+  assert(e.some(x => x.includes('chain[0]')), 'unreceipted hop on a DEAD fact passed: ' + e.join('; '));
+});
+check('a path present but structurally broken is caught on a LIVE limit fact', () => {
+  const bad = fact({ kind: 'limit', path: { entry: '', exit: '', chain: [] } });
+  assert(errorsOf(S.validateFact, bad).length > 0, 'broken optional path passed unvalidated');
+});
+
+// ---- render filtering: one rule, executable -------------------------------
+
+console.log('render filtering:');
+check('rendersTo excludes every non-LIVE fact from business and guide output', () => {
+  for (const c of ['DEAD', 'HALF-BUILT', 'UNCLEAR']) {
+    assert(S.rendersTo({ classification: c }, 'prd') === false, `${c} reached prd`);
+    assert(S.rendersTo({ classification: c }, 'guides') === false, `${c} reached guides`);
+    assert(S.rendersTo({ classification: c }, 'tech') === true, `${c} hidden from tech output`);
+  }
+  assert(S.rendersTo({ classification: 'LIVE' }, 'prd') === true, 'LIVE excluded from prd');
+  assert(S.rendersTo({ classification: 'BOGUS' }, 'tech') === false, 'unknown classification rendered');
+  assert(S.rendersTo({ classification: 'LIVE' }, 'nonsense') === false, 'unknown audience rendered');
+  assert(S.rendersTo(null, 'prd') === false, 'null fact rendered');
+});
+
+// ---- the out/ file contract -----------------------------------------------
+
+console.log('out contract:');
+const TERRAIN_SHAPE = { modules: ['payments', 'accounts'], surfaces: [
+  { id: 'user-app', kind: 'frontend' }, { id: 'ops', kind: 'admin-web' }, { id: 'settler', kind: 'worker' }
+] };
+check('outDocuments names every expected document for the enabled audiences', () => {
+  const docs = S.outDocuments(S.defaultConfig('t'), TERRAIN_SHAPE);
+  for (const d of ['prd.md', 'tech/payments.md', 'tech/accounts.md',
+                   'guides/user-app.md', 'guides/ops.md', 'questions.md', 'map.md']) {
+    assert(docs.includes(d), `missing ${d} from: ${docs.join(', ')}`);
+  }
+  assert(!docs.includes('guides/settler.md'), 'wrote a user guide for a non-interactive surface');
+  assert(docs.every(d => S.isSafeOutPath(d)), 'produced a document path its own rule rejects');
+  assert(docs.join() === [...docs].sort().join(), 'document list is not deterministically ordered');
+});
+check('a disabled audience produces no documents', () => {
+  const cfg = { ...S.defaultConfig('t'), audiences: { prd: false, tech: true, guides: false } };
+  const docs = S.outDocuments(cfg, TERRAIN_SHAPE);
+  assert(!docs.some(d => d === 'prd.md' || d.startsWith('guides/')), 'disabled audiences still wrote: ' + docs.join(', '));
+  assert(docs.some(d => d.startsWith('tech/')), 'enabled audience produced nothing');
+});
+check('outDocuments never throws on hostile terrain and skips unusable ids', () => {
+  for (const t of [null, 42, {}, { modules: 'x', surfaces: 'y' }, { modules: [null, '../x'], surfaces: [null, { id: '../e', kind: 'frontend' }] }]) {
+    let docs;
+    try { docs = S.outDocuments(S.defaultConfig('t'), t); }
+    catch (e) { throw new Error(`threw on ${JSON.stringify(t)}: ${e.message}`); }
+    assert(Array.isArray(docs), 'did not return an array');
+    assert(docs.every(d => S.isSafeOutPath(d)), 'a hostile id escaped into a document path: ' + docs.join(', '));
+  }
+});
+check('isSafeOutPath refuses traversal and absolute destinations', () => {
+  for (const p of ['../x.md', '/etc/x.md', 'tech/../../x.md', 'x.md ', 'tech/x.txt', '']) {
+    assert(S.isSafeOutPath(p) === false, `accepted out path ${JSON.stringify(p)}`);
+  }
+});
+
+// ---- witness input hash: buildable, canonical -----------------------------
+
+console.log('witness input hash:');
+const EX_A = { file: 'src/a.ts', line: 10, end_line: 12, code: 'function a() {\n  return 1;\n}' };
+const EX_B = { file: 'src/b.ts', line: 3, end_line: 3, code: 'const b = 2;' };
+check('witnessInputHash is a sha256 hex digest and is deterministic', () => {
+  const h1 = S.witnessInputHash('A statement.', [EX_A, EX_B]);
+  const h2 = S.witnessInputHash('A statement.', [EX_A, EX_B]);
+  assert(/^[a-f0-9]{64}$/.test(h1), `not a sha256 hex digest: ${h1}`);
+  assert(h1 === h2, 'not deterministic');
+});
+check('excerpt order does not change the hash, but content does', () => {
+  assert(S.witnessInputHash('S', [EX_A, EX_B]) === S.witnessInputHash('S', [EX_B, EX_A]),
+    'hash depends on excerpt order');
+  assert(S.witnessInputHash('S', [EX_A]) !== S.witnessInputHash('S.', [EX_A]),
+    'a changed statement kept its hash');
+  assert(S.witnessInputHash('S', [EX_A]) !== S.witnessInputHash('S', [{ ...EX_A, code: EX_A.code + ' ' }]),
+    'changed code kept its hash');
+  assert(S.witnessInputHash('S', [EX_A]) !== S.witnessInputHash('S', [{ ...EX_A, line: 11 }]),
+    'a changed citation range kept its hash');
+});
+check('line endings and surrounding whitespace are canonicalized away', () => {
+  const crlf = { ...EX_A, code: EX_A.code.replace(/\n/g, '\r\n') };
+  assert(S.witnessInputHash('S', [EX_A]) === S.witnessInputHash('S', [crlf]), 'CRLF changed the hash');
+  assert(S.witnessInputHash('S', [EX_A]) === S.witnessInputHash('  S \n', [EX_A]), 'statement padding changed the hash');
+});
+check('witnessInputHash refuses unusable input instead of hashing junk', () => {
+  for (const bad of [[null, [EX_A]], ['S', []], ['S', null], ['S', [{ file: 'x', line: 0, code: 'c' }]], ['', [EX_A]]]) {
+    let threw = false;
+    try { S.witnessInputHash(bad[0], bad[1]); } catch { threw = true; }
+    assert(threw, `hashed junk input ${JSON.stringify(bad[0])}`);
+  }
+});
+
+// ---- manifest / terrain / raised validators --------------------------------
+
+console.log('manifest, terrain, raised:');
+const cleanManifest = {
+  ogham_version: 1, project: 'acme', repo_root: '.', cutoff_commit: 'a1b2c3d',
+  generated_at: '2026-08-05T12:00:00Z',
+  counts: { surfaces: 2, modules: 14, features: 63, facts: 212, ledger_open: 7 }
+};
+const cleanTerrain = {
+  surfaces: [{ id: 'user-app', kind: 'frontend', root: 'apps/mobile', entry_points: ['apps/mobile/src/main.tsx'] }],
+  modules: [{ id: 'payments', name: 'Payments', surface_ids: ['user-app'], roots: ['apps/mobile/src/payments'], summary: 'Paying bills' }],
+  languages: { ts: 61234 }
+};
+for (const [name, v] of [['validateManifest', S.validateManifest], ['validateTerrain', S.validateTerrain],
+                         ['validateRaised', S.validateRaised]]) {
+  check(`${name} exists, never throws, and reports on hostile input`, () => {
+    assert(typeof v === 'function', `${name} is not exported — the schema doc claims it exists`);
+    for (const h of HOSTILE) noThrow(v, h, `${name}(${String(h)})`);
+    for (const h of [null, 42, 'x']) assert(errorsOf(v, h).length > 0, `${name}(${String(h)}) reported nothing`);
+  });
+}
+check('clean manifest/terrain/raised pass their validators', () => {
+  assert(errorsOf(S.validateManifest, cleanManifest).length === 0, errorsOf(S.validateManifest, cleanManifest).join('; '));
+  assert(errorsOf(S.validateTerrain, cleanTerrain).length === 0, errorsOf(S.validateTerrain, cleanTerrain).join('; '));
+  assert(errorsOf(S.validateRaised, { raised: ['Q-001', 'Q-002'] }).length === 0, 'clean raised rejected');
+});
+check('manifest rejects an option-shaped cutoff_commit and a bad version', () => {
+  assert(errorsOf(S.validateManifest, { ...cleanManifest, cutoff_commit: '--output=/tmp/pwn' }).length > 0, 'accepted git argv injection');
+  assert(errorsOf(S.validateManifest, { ...cleanManifest, ogham_version: 99 }).length > 0, 'accepted a future schema version');
+  assert(errorsOf(S.validateManifest, { ...cleanManifest, counts: { surfaces: -1 } }).length > 0, 'accepted negative counts');
+});
+check('terrain rejects unsafe roots, unknown surface kinds, and dangling surface_ids', () => {
+  assert(errorsOf(S.validateTerrain, { ...cleanTerrain, surfaces: [{ ...cleanTerrain.surfaces[0], root: '../..' }] }).length > 0, 'accepted an escaping root');
+  assert(errorsOf(S.validateTerrain, { ...cleanTerrain, surfaces: [{ ...cleanTerrain.surfaces[0], kind: 'mainframe' }] }).length > 0, 'accepted an unknown surface kind');
+  assert(errorsOf(S.validateTerrain, { ...cleanTerrain, modules: [{ ...cleanTerrain.modules[0], surface_ids: ['ghost'] }] }).some(x => x.includes('ghost')), 'accepted a dangling surface_id');
+});
+check('raised rejects ids outside the ID grammar', () => {
+  assert(errorsOf(S.validateRaised, { raised: ['Q-001', '../../etc'] }).length > 0, 'accepted a path-shaped question id');
+  assert(errorsOf(S.validateRaised, { raised: ['Q-1', 'Q-1'] }).some(x => x.includes('duplicate')), 'accepted duplicate raised ids');
+});
+
+// ---- attacker text never reaches the terminal raw --------------------------
+
+console.log('error string safety:');
+check('control characters in attacker-controlled fields are escaped in errors', () => {
+  // ESC + erase-line + CR: on a terminal this rewrites the line it printed on,
+  // so a validator error can be made to read as a passing verdict. Both the
+  // probe and the detector are built from char codes, so this file never
+  // contains a literal control byte and cannot trip its own rule.
+  const hasControl = s => {
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      if (c < 9 || (c > 10 && c < 32) || c === 127) return true;
+      if (c >= 128 && c <= 159) return true;
+      if (c >= 0x202a && c <= 0x202e) return true;
+    }
+    return false;
+  };
+  const spoof = String.fromCharCode(27) + "[2K" + String.fromCharCode(13) + "ok    all nine checks PASS";
+  const runs = [
+    () => errorsOf(S.validateFact, fact({ classification: spoof })),
+    () => errorsOf(S.validateFact, fact({ kind: spoof })),
+    () => errorsOf(S.validateFact, fact({ id: spoof })),
+    () => errorsOf(S.validateFeature, feature({ id: spoof })),
+    () => errorsOf(S.validateLedgerEntry, { ...cleanLedgerEntry, status: spoof }),
+    () => errorsOf(S.validateModuleFile, moduleDoc({ features: [feature({ id: spoof, fact_ids: ['ghost'] })] })),
+    () => errorsOf((w, e) => S.validateWitness(w, e, 't'), { verdict: spoof }),
+    () => errorsOf(S.validateConfig, { ...S.defaultConfig('t'), destination: { kind: spoof, asked: true } })
+  ];
+  for (const run of runs) {
+    for (const msg of run()) {
+      assert(!hasControl(msg), `raw control byte reached an error string: ${JSON.stringify(msg)}`);
+    }
+  }
+});
+
 // ---- init against a real temp dir -----------------------------------------
 
 console.log('init:');
 const quiet = () => {};
 check('init scaffolds the full tree and config validates', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogma-bench-'));
+  const dir = tmpdir();
   assert(cmdInit(dir, quiet) === 0, 'init failed');
   for (const p of ['.ogma/config.json', '.ogma/ogham/facts', '.ogma/ogham/graph', '.ogma/ogham/ledger.json', '.ogma/out']) {
     assert(fs.existsSync(path.join(dir, p)), `missing ${p}`);
@@ -366,7 +649,7 @@ check('init scaffolds the full tree and config validates', () => {
   assert(errorsOf(S.validateConfig, cfg).length === 0, 'written config invalid');
 });
 check('re-init preserves an existing ledger even when config.json is missing', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogma-bench-'));
+  const dir = tmpdir();
   cmdInit(dir, quiet);
   const ledgerPath = path.join(dir, '.ogma/ogham/ledger.json');
   fs.writeFileSync(ledgerPath, JSON.stringify({ questions: [{ id: 'Q-1' }] }));
@@ -377,20 +660,85 @@ check('re-init preserves an existing ledger even when config.json is missing', (
   assert(fs.existsSync(path.join(dir, '.ogma/config.json')), 'config not repaired');
 });
 check('init refuses when .ogma is a regular file, with one clean message', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogma-bench-'));
+  const dir = tmpdir();
   fs.writeFileSync(path.join(dir, '.ogma'), 'not a dir');
   const msgs = [];
   assert(cmdInit(dir, m => msgs.push(m)) === 1, 'did not fail');
   assert(msgs.length === 1 && msgs[0].includes('already exists'), 'no clean message: ' + msgs.join(' | '));
 });
 check('fully-initialized re-run touches nothing and says so', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogma-bench-'));
+  const dir = tmpdir();
   cmdInit(dir, quiet);
   const before = fs.readFileSync(path.join(dir, '.ogma/config.json'), 'utf8');
   const msgs = [];
   assert(cmdInit(dir, m => msgs.push(m)) === 0, 'rerun failed');
   assert(msgs[0].includes('nothing touched'), 'wrong message');
   assert(fs.readFileSync(path.join(dir, '.ogma/config.json'), 'utf8') === before, 'config rewritten');
+});
+check('init refuses a symlinked .ogma instead of writing through it', () => {
+  const dir = tmpdir();
+  const target = tmpdir();
+  const link = path.join(dir, '.ogma');
+  let made = false;
+  for (const type of ['junction', 'dir']) {
+    try { fs.symlinkSync(target, link, type); made = true; break; } catch { /* try next */ }
+  }
+  // Not a silent skip: if the platform refuses both link types, say so loudly.
+  assert(made, 'PLATFORM CANNOT CREATE A LINK — symlink refusal is UNTESTED on this machine');
+  const msgs = [];
+  assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init wrote through a symlink');
+  assert(msgs.join(' ').includes('symlink'), 'refused without naming the reason: ' + msgs.join(' | '));
+  assert(fs.readdirSync(target).length === 0, 'the link target was written into');
+});
+check('init refuses a symlinked ledger.json instead of writing through it', () => {
+  const dir = tmpdir();
+  const outside = path.join(tmpdir(), 'stolen.json');
+  cmdInit(dir, quiet);
+  const ledger = path.join(dir, '.ogma/ogham/ledger.json');
+  fs.unlinkSync(ledger);
+  let made = false;
+  try { fs.symlinkSync(outside, ledger, 'file'); made = true; } catch { /* privilege */ }
+  if (!made) { console.log('       (file symlinks unavailable on this machine — dir case covers the class)'); return; }
+  const msgs = [];
+  assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init wrote through a symlinked ledger');
+  assert(!fs.existsSync(outside), 'created a file outside the project through the link');
+});
+check('init refuses a hostile existing config.json instead of adopting it', () => {
+  const dir = tmpdir();
+  cmdInit(dir, quiet);
+  fs.writeFileSync(path.join(dir, '.ogma/config.json'),
+    JSON.stringify({ version: 1, project: 'p', audiences: { prd: true, tech: true, guides: true },
+                     destination: { kind: 'attacker-endpoint', asked: true }, language: 'en',
+                     leaklint_extra: [], readability_max_grade: 10 }));
+  const msgs = [];
+  assert(cmdInit(dir, m => msgs.push(m)) === 1, 'adopted an attacker-chosen destination and reported success');
+  assert(msgs.join(' ').includes('config.json'), 'refused without naming the file: ' + msgs.join(' | '));
+});
+check('init refuses an oversized config.json without reading it into memory', () => {
+  const dir = tmpdir();
+  cmdInit(dir, quiet);
+  const p = path.join(dir, '.ogma/config.json');
+  fs.writeFileSync(p, '{"version":1,"pad":"' + 'a'.repeat(70 * 1024) + '"}');
+  const msgs = [];
+  assert(cmdInit(dir, m => msgs.push(m)) === 1, 'accepted an oversized settings file');
+  assert(msgs.join(' ').includes('limit'), 'refused without naming the limit: ' + msgs.join(' | '));
+});
+check('init refuses an unparseable config.json rather than reporting initialized', () => {
+  const dir = tmpdir();
+  cmdInit(dir, quiet);
+  fs.writeFileSync(path.join(dir, '.ogma/config.json'), '{ not json');
+  assert(cmdInit(dir, quiet) === 1, 'reported success over unparseable settings');
+});
+check('init keeps a valid hand-edited config unchanged', () => {
+  const dir = tmpdir();
+  cmdInit(dir, quiet);
+  const p = path.join(dir, '.ogma/config.json');
+  const edited = { ...S.defaultConfig(path.basename(dir)), readability_max_grade: 8,
+                   audiences: { prd: true, tech: false, guides: true } };
+  fs.writeFileSync(p, JSON.stringify(edited, null, 2) + '\n');
+  const before = fs.readFileSync(p, 'utf8');
+  assert(cmdInit(dir, quiet) === 0, 'rejected a valid hand-edited config');
+  assert(fs.readFileSync(p, 'utf8') === before, 'overwrote a valid hand-edited config');
 });
 
 // ---- CLI process-level behavior -------------------------------------------
@@ -422,6 +770,19 @@ check('extra arguments are refused, not silently ignored', () => {
 check('version prints the package version', () => {
   const r = run(['version']);
   assert(r.status === 0 && r.stdout.trim() === require('../package.json').version, 'wrong version output');
+});
+
+// ---- the bench cleans up after itself -------------------------------------
+
+console.log('housekeeping:');
+const leaked = [];
+for (const d of TEMPS) {
+  try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* reported below */ }
+  if (fs.existsSync(d)) leaked.push(d);
+}
+check('bench leaves no temp directories behind', () => {
+  assert(TEMPS.length > 0, 'no temp dirs were tracked — the helper is not being used');
+  assert(leaked.length === 0, `leaked ${leaked.length} temp dirs: ${leaked.join(', ')}`);
 });
 
 // ---------------------------------------------------------------------------
