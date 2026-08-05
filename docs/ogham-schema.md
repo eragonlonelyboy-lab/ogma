@@ -48,7 +48,7 @@ The core law: **a fact without a receipt does not enter the Ogham.** Every claim
 }
 ```
 
-A **surface** is a distinct app a person can open (user app, admin web, worker). A **module** is a business area a stakeholder would name — not a code community.
+A **surface** is a distinct app a person can open (user app, admin web, worker). A **module** is a business area a stakeholder would name — not a code community. A module with no features must carry an `empty_reason` string explaining why it exists in the terrain at all.
 
 ## facts/<module>.json — the atoms
 
@@ -85,7 +85,7 @@ A **surface** is a distinct app a person can open (user app, admin web, worker).
 
 Rules:
 - `kind`: `behavior` | `rule` | `limit` | `state` | `integration`
-- `classification` (feature = worst of its facts):
+- `classification` (feature = worst of its facts; severity order LIVE < DEAD < HALF-BUILT < UNCLEAR):
   - **LIVE** — reachable from a real entry point, wired end to end
   - **DEAD** — code exists, nothing references it (tech voice only; never in PRD or guides)
   - **HALF-BUILT** — partially wired, ends nowhere (ledger; never narrated as working)
@@ -166,7 +166,7 @@ Rules:
 
 `destination.kind`: `null` until the ask-once flow runs; then e.g. `confluence`, `notion`, `markdown-only`. OGMA always keeps the local markdown fleet regardless of destination.
 
-## Invariants (enforced by `lib/schema.js`, re-checked by the gate)
+## Invariants (per-record and per-module-file enforced by `lib/schema.js`; global cross-file checks — ID uniqueness across modules, ledger reference resolution — are the gate's)
 
 1. Every fact: ≥1 receipt, valid classification, existing `feature_id`.
 2. Every feature: ≥1 fact, all of does/happens/sees non-empty, belongs to an existing module.

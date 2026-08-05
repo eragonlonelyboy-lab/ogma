@@ -26,17 +26,6 @@ const POWERS = [
   { cmd: 'gate',      batch: 5, built: false, desc: 'Run the seven checks and emit the certificate' }
 ];
 
-function findOgmaDir(startDir) {
-  let dir = startDir;
-  for (;;) {
-    const candidate = path.join(dir, '.ogma');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
 function printHelp() {
   console.log(`OGMA v${VERSION} — One Graph, Many Audiences (Ogham schema v${OGHAM_VERSION})`);
   console.log('Reads a codebase once into a receipt-backed model, renders it per audience,');
