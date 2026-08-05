@@ -1,0 +1,75 @@
+{
+  "artifact": "OGMA Batch 0 — foundation",
+  "round": 3,
+  "reviewed_at": "2026-08-05",
+  "commit": "18286de",
+  "panel": "5 blind critics vs frozen tree 18286de — all five reported",
+  "verdict": "FAIL",
+  "confidence": 0.68,
+  "perLens": [
+    {
+      "lens": "spec",
+      "score": 6,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -2,
+      "pass": false
+    },
+    {
+      "lens": "correctness",
+      "score": 6,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -2,
+      "pass": false
+    },
+    {
+      "lens": "code",
+      "score": 7,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -1,
+      "pass": false
+    },
+    {
+      "lens": "edge-cases",
+      "score": 5,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -3,
+      "pass": false
+    },
+    {
+      "lens": "security",
+      "score": 7,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -1,
+      "pass": false
+    }
+  ],
+  "trajectory": "round1: 3/4/4/5/5 (all fail) -> round3: 5/6/6/7/7 (all fail). Every lens improved; none reached bar 8.",
+  "budget": "3 rounds spent — loop halted per ZOILUS budget rule, findings handed to decider",
+  "blocking_findings": [
+    "PATH-SHAPE (found independently by TWO lenses): allow-list segment rule rejects Next.js/SvelteKit/monorepo/non-ASCII/space paths -> those files can never be cited -> silently undocumented + certificate still PASS. Fix: invert to deny-list.",
+    "path + hop receipts unvalidated on any non-LIVE fact — the documented demotion lifecycle produces exactly this state",
+    "witness freshness (checked_at_commit == verified_at_commit) documented as CLI-enforced but enforced nowhere",
+    "witness rule contradicts itself across schema doc :119, :145 and SKILL.md — maker fixed one site in round 2, left two",
+    "no check binds the Ogham to repo HEAD: a fully stale Ogham certifies PASS",
+    "out/ file contract absent — 4 of 9 gate checks read documents whose paths/format are unspecified",
+    "input_hash canonicalization unspecified — the anti-forgery mechanism is unbuildable as written",
+    "render filtering: prose excludes all non-LIVE, invariant enforces DEAD only",
+    "FORBIDDEN_ROOTS case-sensitive — fails on win32/macOS",
+    "symlink refusal (headline security property) has zero test coverage",
+    "bench leaks a temp dir per run; comment in schema.js misstates its own rationale",
+    "config.json shipped by a hostile repo is kept unvalidated and reported as initialized — attacker-chosen destination with asked:true adopted silently",
+    "manifest/terrain/raised have NO validator while the doc claims one exists — a false coverage claim, worse than a missing guard",
+    "control characters pass into validator error strings -> terminal spoofing of a passing verdict"
+  ],
+  "held_up": [
+    "0 throws across 11832 fuzzed hostile inputs",
+    "CLI behavior correct on every probe",
+    "init survives hostile filesystem layouts + preserves hand-edited ledger",
+    "bidirectional links, worst-of-facts, narration split, receipts law all behave as specified"
+  ]
+}
