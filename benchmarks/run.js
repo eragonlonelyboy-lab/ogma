@@ -35,7 +35,8 @@ const cleanFact = {
   id: 'FACT-payments-001', feature_id: 'FEAT-payments-pay-bill', kind: 'rule',
   statement: 'A payment above the daily limit is rejected with a limit message.',
   classification: 'LIVE', receipts: [{ ...R }], path: PATHOBJ, ledger_refs: [],
-  witness: { verdict: 'CONFIRMED', checked_at_commit: 'a1b2c3d' }
+  witness: { verdict: 'CONFIRMED', checked_at_commit: 'a1b2c3d', checker: 'blind-witness-v1', input_hash: 'a'.repeat(64) },
+  verified_at_commit: 'a1b2c3d', status: 'fresh'
 };
 const cleanFeature = {
   id: 'FEAT-payments-pay-bill', name: 'Pay a bill', classification: 'LIVE',
@@ -137,6 +138,15 @@ check('backslash and NUL paths rejected', () => {
   assert(S.isSafeRepoPath('src' + String.fromCharCode(92) + 'a.ts') === false, 'accepted backslash');
   assert(S.isSafeRepoPath('src/a' + String.fromCharCode(0) + '.ts') === false, 'accepted NUL');
 });
+check('dot segments rejected (path-identity ambiguity)', () => {
+  assert(S.isSafeRepoPath('./src/a.ts') === false, 'accepted ./x');
+  assert(S.isSafeRepoPath('.') === false, 'accepted .');
+});
+check('hyphenated project names survive defaultConfig and validate', () => {
+  const cfg = S.defaultConfig('my-app');
+  assert(cfg.project === 'my-app', `hyphen mangled: ${cfg.project}`);
+  assert(errorsOf(S.validateConfig, cfg).length === 0, 'rejected hyphenated project');
+});
 check('line bounds enforced', () => {
   for (const l of [0, -1, 1.5, S.MAX_LINE + 1]) {
     assert(errorsOf((r, e) => S.validateReceipt(r, e, 't'), { ...R, line: l }).length > 0, `accepted line ${l}`);
@@ -187,7 +197,14 @@ check('empty-string ledger_refs rejected', () => {
   assert(errorsOf(S.validateFact, f).some(x => x.includes('ledger_refs[0]')), 'accepted empty-string ref');
 });
 check('bad witness verdict rejected', () =>
-  assert(errorsOf(S.validateFact, fact({ witness: { verdict: 'TRUST_ME', checked_at_commit: 'a' } })).length > 0, 'accepted TRUST_ME'));
+  assert(errorsOf(S.validateFact, fact({ witness: { ...cleanFact.witness, verdict: 'TRUST_ME' } })).length > 0, 'accepted TRUST_ME'));
+check('witness without checker or input_hash rejected', () => {
+  assert(errorsOf(S.validateFact, fact({ witness: { verdict: 'CONFIRMED', checked_at_commit: 'a' } })).length > 0, 'accepted provenance-free ruling');
+});
+check('bad status / verified_at_commit rejected', () => {
+  assert(errorsOf(S.validateFact, fact({ status: 'banana' })).some(x => x.includes('status')), 'accepted status=banana');
+  assert(errorsOf(S.validateFact, fact({ verified_at_commit: 12345 })).some(x => x.includes('verified_at_commit')), 'accepted numeric commit');
+});
 
 // ---- feature --------------------------------------------------------------
 
@@ -197,11 +214,25 @@ for (const k of ['does', 'happens', 'sees']) {
   check(`LIVE feature with empty ${k} rejected`, () =>
     assert(errorsOf(S.validateFeature, feature({ [k]: '' })).some(x => x.includes(k)), `accepted empty ${k}`));
 }
-check('non-LIVE feature requires why_not_reachable, not does/happens/sees', () => {
+check('non-LIVE unnarrated feature requires why_not_narrated', () => {
   const f = feature({ classification: 'DEAD' }); delete f.does; delete f.happens; delete f.sees;
-  assert(errorsOf(S.validateFeature, f).some(x => x.includes('why_not_reachable')), 'no why_not_reachable error');
-  f.why_not_reachable = 'No route or caller references this code.';
+  assert(errorsOf(S.validateFeature, f).some(x => x.includes('why_not_narrated')), 'no why_not_narrated error');
+  f.why_not_narrated = 'No route or caller references this code.';
   assert(errorsOf(S.validateFeature, f).length === 0, 'rejected valid DEAD feature');
+});
+check('narration policy: LIVE facts present -> must narrate; none -> must not', () => {
+  const half = fact({ id: 'FACT-H', classification: 'HALF-BUILT', ledger_refs: ['Q-1'] }); delete half.path;
+  half.feature_id = 'FEAT-payments-pay-bill';
+  // Mixed feature (LIVE + HALF-BUILT): keeps narration, rollup drops to HALF-BUILT
+  const mixed = feature({ classification: 'HALF-BUILT', fact_ids: ['FACT-payments-001', 'FACT-H'] });
+  const e1 = errorsOf(S.validateModuleFile, { module: 'm', features: [mixed], facts: [cleanFact, half] });
+  assert(e1.length === 0, 'rejected narrated mixed feature: ' + e1.join('; '));
+  // Zero LIVE facts but narrated: fabrication, rejected
+  const soloHalf = fact({ id: 'FACT-H2', feature_id: 'FEAT-X', classification: 'HALF-BUILT', ledger_refs: ['Q-1'] });
+  delete soloHalf.path;
+  const fab = feature({ id: 'FEAT-X', classification: 'HALF-BUILT', fact_ids: ['FACT-H2'] });
+  const e2 = errorsOf(S.validateModuleFile, { module: 'm', features: [fab], facts: [soloHalf] });
+  assert(e2.some(x => x.includes('fabrication')), 'accepted narration with zero LIVE facts: ' + e2.join('; '));
 });
 check('feature without facts rejected', () =>
   assert(errorsOf(S.validateFeature, feature({ fact_ids: [] })).length > 0, 'accepted factless feature'));
@@ -230,7 +261,7 @@ check('empty module with empty_reason passes', () => {
   assert(e.length === 0, e.join('; '));
 });
 check('LIVE feature listing another feature\'s UNCLEAR fact rejected (link direction)', () => {
-  const fB = feature({ id: 'FEAT-B', classification: 'UNCLEAR', why_not_reachable: 'unclear' });
+  const fB = feature({ id: 'FEAT-B', classification: 'UNCLEAR', why_not_narrated: 'unclear ownership' });
   delete fB.does; delete fB.happens; delete fB.sees;
   fB.fact_ids = ['FACT-X'];
   const fA = feature({ id: 'FEAT-A', fact_ids: ['FACT-X'] });
@@ -333,7 +364,7 @@ function run(args) { return spawnSync(process.execPath, [BIN, ...args], { encodi
 check('--help exits 0 and lists every power', () => {
   const r = run(['--help']);
   assert(r.status === 0, `exit ${r.status}`);
-  for (const p of ['init', 'ingest', 'gate', 'witness'.slice(0, 0) || 'watch']) assert(r.stdout.includes(p), `help missing ${p}`);
+  for (const p of ['init', 'ingest', 'gate', 'watch']) assert(r.stdout.includes(p), `help missing ${p}`);
 });
 check('unbuilt command exits 1 and names its batch', () => {
   const r = run(['prd']);

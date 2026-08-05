@@ -4,7 +4,7 @@ The Ogham is OGMA's internal model of a codebase: the One Graph that every outpu
 
 Two laws:
 1. **A fact without a receipt does not enter the Ogham.** Every claim carries at least one code citation, re-verified deterministically.
-2. **A fact without a CONFIRMED witness ruling does not leave it.** Receipts prove the citation is real; the witness pass checks the *sentence* against the cited code (see The witness pass).
+2. **A LIVE fact without a fresh CONFIRMED witness ruling does not render.** Receipts prove the citation is real; the witness pass checks the *statement* against the cited code (see The witness pass). Non-LIVE facts keep their last ruling — a REFUTED ruling is precisely why a fact stops being LIVE.
 
 Renderers read the Ogham and never the repo, so every audience retells the same facts.
 
@@ -61,7 +61,9 @@ All paths everywhere in the Ogham are **repo-relative POSIX paths from `manifest
 }
 ```
 
-A **surface** is a distinct app a person can open (user app, admin web, worker). A **module** is a business area a stakeholder would name — not a code community. Module `roots` sit under their surface's `root`; all are repo-relative. A module with no features must carry an `empty_reason` string in its facts file.
+A **surface** is a distinct deployable a person or system runs. `kind`: `frontend` | `admin-web` | `worker` | `service`. Interactive kinds (`frontend`, `admin-web`) get user guides; non-interactive kinds (`worker`, `service`) are exempt from the `guides` audience, and the certificate's coverage detail records the exemption. A **module** is a business area a stakeholder would name — not a code community. Module `roots` sit under their surface's `root`; all are repo-relative. A module with no features must carry an `empty_reason` string in its facts file.
+
+**ID grammar** (enforced by the gate's `integrity` check): features `FEAT-<module>-<slug>`, facts `FACT-<module>-<seq>`, questions `Q-<seq>` — all matching `[A-Za-z0-9-]+`, unique across the whole Ogham.
 
 ## facts/<module>.json — the atoms
 
@@ -92,7 +94,7 @@ A **surface** is a distinct app a person can open (user app, admin web, worker).
         "chain": [ { "hop": "service.validateDailyLimit", "receipt": { "file": "src/payments/service.ts", "line": 88, "symbol": "validateDailyLimit" } } ],
         "exit": "201 + reference"
       },
-      "witness": { "verdict": "CONFIRMED", "checked_at_commit": "a1b2c3d" },
+      "witness": { "verdict": "CONFIRMED", "checked_at_commit": "a1b2c3d", "checker": "blind-witness-v1", "input_hash": "<sha256 of statement + code excerpt>" },
       "verified_at_commit": "a1b2c3d",
       "status": "fresh",
       "ledger_refs": []
@@ -110,7 +112,7 @@ Field rules (all enforced by `lib/schema.js` unless marked gate):
   - **HALF-BUILT** — partially wired, ends nowhere
   - **UNCLEAR** — cannot be determined from code
 - **Render filtering is per-FACT:** DEAD facts never appear in business (`prd`) or guide output, whatever their feature's rollup says. A feature's `classification` is **computed** — worst of the facts it owns — and the validator rejects a stored value that disagrees with the recompute. A LIVE feature therefore contains only LIVE facts; a feature dragged down by one doubtful fact surfaces that in its rollup instead of hiding it.
-- **Feature narration is scoped by classification:** LIVE features carry `does`/`happens`/`sees`. Non-LIVE features carry `why_not_reachable` instead — narrating an unreachable feature's user experience would be fabrication.
+- **Feature narration follows the facts it owns:** a feature with ≥1 LIVE fact carries `does`/`happens`/`sees` (its non-LIVE facts are simply excluded from business/guide render — a mostly-working feature stays narrated, its rollup classification surfaces the doubt). A feature with **zero** LIVE facts carries `why_not_narrated` instead — narrating an experience no user can have would be fabrication.
 - **The feature↔fact link must agree in both directions:** every id in `fact_ids` is a fact whose `feature_id` points back, and every fact pointing at a feature is listed in its `fact_ids`. A feature owning zero facts is an orphan (error).
 - Every fact has **≥1 receipt** — including DEAD/HALF-BUILT/UNCLEAR facts, whose receipts point at the code that raised the doubt.
 - `path` is required for LIVE facts of kind `behavior`/`rule`; **every chain hop carries its own receipt**, making "each hop receipted" checkable rather than prose.
@@ -140,9 +142,11 @@ After facts are inscribed, a **blind checker** — given ONLY the fact's `statem
 - **REFUTED** — the cited code says otherwise
 - **UNSUPPORTED** — the cited code doesn't show this
 
-Non-CONFIRMED facts loop: re-read the code, rewrite the statement from it, re-witness — at most 3 passes, then the fact drops to UNCLEAR and enters the ledger. The ruling is stored on the fact; the CLI cannot re-judge it but deterministically enforces **presence, verdict, and freshness** (`checked_at_commit` must equal the fact's `verified_at_commit`).
+Non-CONFIRMED facts loop: re-read the code, rewrite the statement from it, re-witness — at most 3 passes, then the fact is **reclassified UNCLEAR, keeps its last ruling, and enters the ledger**. That is a legal, certifiable end state: the gate's `witness` check requires a fresh CONFIRMED ruling **on every LIVE fact** and *some* ruling on every fact — it does not demand CONFIRMED of facts the pipeline has already demoted to doubt. Certificate detail reports both populations (e.g. "198/198 LIVE CONFIRMED; 14 non-LIVE carry rulings + ledger refs").
 
-The witness is model judgment and can be wrong. That is why the seeded-false-statement catch rate is measured and published rather than assumed.
+The ruling is stored on the fact with provenance: `checker` (who/what judged) and `input_hash` (sha256 of the exact statement + code excerpt shown). The CLI cannot re-judge, but it deterministically enforces presence, verdict, freshness (`checked_at_commit` = the fact's `verified_at_commit`), and — at gate time — that `input_hash` matches a recomputed hash of the current statement + cited code, so a ruling cannot be quietly reused after either changed.
+
+**Trust boundary, stated plainly:** the witness field is written by the skill layer, and a dishonest or careless host agent could write CONFIRMED without running the pass. The hash check makes that harder (the ruling is bound to exact inputs); it cannot make it impossible. The published seeded-false-statement catch rate is the external evidence that the pass actually discriminates. The witness is model judgment and can be wrong — measured, not assumed.
 
 ## raised.json
 
@@ -152,7 +156,7 @@ During reading, every doubt raised gets an ID appended here **before** ledger au
 { "raised": ["Q-001", "Q-002", "Q-003"] }
 ```
 
-The gate's `ledger` check is `raised ⊆ ledger` — an independent record of what was flagged, so the check has a denominator that isn't the ledger itself.
+The gate's `ledger` check is `raised ⊆ ledger`. Honest scope: both files are written by the same agent in the same run, so this is a **sequencing check** — it catches a doubt flagged during reading and then lost before ledger authoring. It cannot catch a doubt never recorded at all.
 
 ## ledger.json
 
@@ -163,7 +167,7 @@ The gate's `ledger` check is `raised ⊆ ledger` — an independent record of wh
       "id": "Q-003",
       "module": "payments",
       "question": "Refund flow has a service and tests but no route registers it. Shipped elsewhere, or unfinished?",
-      "classification_context": "HALF-BUILT",
+      "classification_context": "HALF-BUILT",  // optional; one of the four classifications — which doubt-state raised this
       "receipts": [ { "file": "src/payments/refund.ts", "line": 12, "symbol": "RefundService" } ],
       "status": "open",
       "owner": null,
@@ -182,7 +186,7 @@ Business (`prd`) and guide output must contain zero technical vocabulary. The ba
 
 ## Readability
 
-Check 8 scores narrative prose with **Flesch-Kincaid grade level**. Scored: paragraph text in rendered business/guide output. Excluded: headings, tables, code blocks, list markers, and fact-ID annotations. Sentence boundary: `.`, `!`, `?` followed by whitespace. The score must not exceed `config.readability_max_grade` (default 10).
+Check 8 scores narrative prose with **Flesch-Kincaid grade level, computed per rendered document; every document must be ≤ `config.readability_max_grade`** (default 10) — no averaging, one hard document hides inside a passing mean. Scored: paragraph text in rendered business/guide output. Excluded: headings, tables, code blocks, list markers, and fact-ID annotations. Sentence boundary: `.`, `!`, `?` followed by whitespace. Certificate detail reports the worst document, not the mean.
 
 ## certificate.json
 
@@ -195,13 +199,13 @@ Check 8 scores narrative prose with **Flesch-Kincaid grade level**. Scored: para
   "audiences_enabled": ["prd", "tech", "guides"],
   "checks": [
     { "id": "coverage",   "pass": true, "detail": "14/14 modules rendered in every enabled audience" },
-    { "id": "receipts",   "pass": true, "detail": "212/212 citations verified, 0 broken" },
-    { "id": "witness",    "pass": true, "detail": "212/212 facts CONFIRMED at their verified commit" },
+    { "id": "receipts",   "pass": true, "detail": "241/241 receipt objects verified (fact + path-hop + ledger receipts), 0 broken" },
+    { "id": "witness",    "pass": true, "detail": "198/198 LIVE facts CONFIRMED at their verified commit; 14 non-LIVE carry rulings + ledger refs; input hashes match" },
     { "id": "leaklint",   "pass": true, "detail": "0 banned terms in business/guide outputs" },
-    { "id": "complete",   "pass": true, "detail": "58/58 LIVE features carry does/happens/sees; 5/5 non-LIVE carry why_not_reachable" },
+    { "id": "complete",   "pass": true, "detail": "60/60 features with LIVE facts carry does/happens/sees; 3/3 without carry why_not_narrated" },
     { "id": "ledger",     "pass": true, "detail": "raised ⊆ ledger: 7/7" },
     { "id": "orphans",    "pass": true, "detail": "0 orphan features; 0 empty modules lacking empty_reason" },
-    { "id": "readability","pass": true, "detail": "grade 8.2 avg (max 10), Flesch-Kincaid" },
+    { "id": "readability","pass": true, "detail": "worst document grade 9.1 (max 10), Flesch-Kincaid per document" },
     { "id": "integrity",  "pass": true, "detail": "IDs unique across modules; all ledger_refs resolve" }
   ],
   "verdict": "PASS"
@@ -231,7 +235,7 @@ Check 8 scores narrative prose with **Flesch-Kincaid grade level**. Scored: para
 Per-record and per-module-file — enforced by `lib/schema.js` (validators report, never throw):
 
 1. Every fact: ≥1 receipt, valid classification, `feature_id` resolving in its module, bidirectional feature↔fact agreement.
-2. Every LIVE feature: all of does/happens/sees; every non-LIVE feature: `why_not_reachable`.
+2. Every feature owning ≥1 LIVE fact: all of does/happens/sees; every feature owning none: `why_not_narrated`.
 3. Every module file: `features`/`facts` present as arrays; zero features requires `empty_reason`.
 4. Every HALF-BUILT/UNCLEAR fact: ≥1 `ledger_refs` entry (string IDs).
 5. Feature classification equals worst-of-owned-facts; in-file ID uniqueness.
