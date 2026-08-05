@@ -5,92 +5,69 @@
 // skill layer's job; proving it is this binary's job.
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { defaultConfig, validateConfig, OGHAM_VERSION } = require('../lib/schema');
+const { OGHAM_VERSION } = require('../lib/schema');
+const { cmdInit } = require('../lib/init');
 
 const VERSION = require('../package.json').version;
 
-// Build status per power. A command that is not built yet says so and exits 1 —
-// it never pretends. Statuses flip as batches land.
+// Command table: doubles as the build-status board. A power without a handler
+// is not built; it says so and exits 1 — it never pretends. "Built but
+// unwired" is structurally impossible: built means handler present.
 const POWERS = [
-  { cmd: 'init',      batch: 0, built: true,  desc: 'Scaffold .ogma/ in the current project (config + Ogham skeleton)' },
-  { cmd: 'ingest',    batch: 3, built: false, desc: 'Read the codebase into the Ogham (terrain -> graph -> sweeps -> facts with receipts)' },
-  { cmd: 'map',       batch: 6, built: false, desc: 'Render the dashboard + canvas from the Ogham' },
-  { cmd: 'explain',   batch: 4, built: false, desc: 'Render implementation notes for engineers' },
-  { cmd: 'prd',       batch: 4, built: false, desc: 'Render the feature-first PRD for business readers' },
-  { cmd: 'guides',    batch: 4, built: false, desc: 'Render click-by-click user guides per surface' },
-  { cmd: 'questions', batch: 4, built: false, desc: 'Show the open-questions ledger' },
-  { cmd: 'watch',     batch: 7, built: false, desc: 'Diff new commits, invalidate receipts, refresh only stale facts' },
-  { cmd: 'push',      batch: 7, built: false, desc: 'Deliver rendered artifacts to the configured destination' },
-  { cmd: 'gate',      batch: 5, built: false, desc: 'Run the seven checks and emit the certificate' }
+  { cmd: 'init',      batch: 0, handler: cmdInit, desc: 'Scaffold .ogma/ in the current project (config + Ogham skeleton)' },
+  { cmd: 'ingest',    batch: 3, desc: 'Read the codebase into the Ogham (terrain -> graph -> sweeps -> witnessed facts)' },
+  { cmd: 'map',       batch: 6, desc: 'Render the dashboard + canvas from the Ogham' },
+  { cmd: 'explain',   batch: 4, desc: 'Render implementation notes for engineers' },
+  { cmd: 'prd',       batch: 4, desc: 'Render the feature-first PRD for business readers' },
+  { cmd: 'guides',    batch: 4, desc: 'Render click-by-click user guides per surface' },
+  { cmd: 'questions', batch: 4, desc: 'Show the open-questions ledger' },
+  { cmd: 'watch',     batch: 7, desc: 'Diff new commits, invalidate receipts, refresh only stale facts' },
+  { cmd: 'push',      batch: 7, desc: 'Deliver rendered artifacts to the configured destination' },
+  { cmd: 'gate',      batch: 5, desc: 'Run the nine checks and emit the certificate' },
+  { cmd: 'version',   batch: 0, handler: () => { console.log(VERSION); return 0; }, desc: 'Print the version' }
 ];
 
-function printHelp() {
-  console.log(`OGMA v${VERSION} — One Graph, Many Audiences (Ogham schema v${OGHAM_VERSION})`);
-  console.log('Reads a codebase once into a receipt-backed model, renders it per audience,');
-  console.log('and certifies every output with a deterministic gate.\n');
-  console.log('Usage: ogma <command> [options]\n');
+function printHelp(out) {
+  out(`OGMA v${VERSION} — One Graph, Many Audiences (Ogham schema v${OGHAM_VERSION})`);
+  out('Reads a codebase once into a receipt-backed, witness-checked model, renders');
+  out('it per audience, and certifies every output with a deterministic gate.');
+  out('');
+  out('Usage: ogma <command>');
+  out('');
   const pad = Math.max(...POWERS.map(p => p.cmd.length)) + 2;
   for (const p of POWERS) {
-    const status = p.built ? '' : `  [not built yet — arrives in batch ${p.batch}]`;
-    console.log(`  ${p.cmd.padEnd(pad)}${p.desc}${status}`);
+    const status = p.handler ? '' : `  [not built yet — arrives in batch ${p.batch}]`;
+    out(`  ${p.cmd.padEnd(pad)}${p.desc}${status}`);
   }
-  console.log(`  version${' '.repeat(pad - 7)}Print the version`);
-  console.log('\nDocs: docs/ogham-schema.md defines the model. In-development build: only init works.');
-}
-
-function cmdInit(cwd) {
-  const ogmaDir = path.join(cwd, '.ogma');
-  const configPath = path.join(ogmaDir, 'config.json');
-  if (fs.existsSync(configPath)) {
-    console.log(`Already initialized: ${configPath}`);
-    return 0;
-  }
-  const projectName = path.basename(cwd);
-  const config = defaultConfig(projectName);
-  const errors = [];
-  validateConfig(config, errors);
-  if (errors.length) {
-    console.error('Refusing to write an invalid config:');
-    for (const e of errors) console.error(`  - ${e}`);
-    return 1;
-  }
-  fs.mkdirSync(path.join(ogmaDir, 'ogham', 'facts'), { recursive: true });
-  fs.mkdirSync(path.join(ogmaDir, 'ogham', 'graph'), { recursive: true });
-  fs.mkdirSync(path.join(ogmaDir, 'out'), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-  fs.writeFileSync(
-    path.join(ogmaDir, 'ogham', 'ledger.json'),
-    JSON.stringify({ questions: [] }, null, 2) + '\n'
-  );
-  console.log(`Initialized .ogma/ for "${projectName}"`);
-  console.log('  config.json          project settings (destination is asked once, later)');
-  console.log('  ogham/               the One Graph — empty until ingest runs');
-  console.log('  out/                 rendered artifacts land here');
-  return 0;
+  out('');
+  out('Docs: docs/ogham-schema.md defines the model. In-development build: only init works.');
 }
 
 function main(argv) {
   const cmd = argv[2];
-  if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { printHelp(); return 0; }
-  if (cmd === 'version' || cmd === '--version' || cmd === '-v') { console.log(VERSION); return 0; }
+  const rest = argv.slice(3);
+
+  if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { printHelp(console.log); return 0; }
+  if (cmd === '--version' || cmd === '-v') { console.log(VERSION); return 0; }
 
   const power = POWERS.find(p => p.cmd === cmd);
   if (!power) {
-    console.error(`Unknown command: ${cmd}\n`);
-    printHelp();
+    console.error(`Unknown command: ${cmd}`);
+    printHelp(console.error);
     return 1;
   }
-  if (!power.built) {
+  if (rest.length > 0) {
+    console.error(`ogma ${cmd}: unrecognized arguments: ${rest.join(' ')}`);
+    console.error('No command takes arguments yet; refusing rather than silently ignoring them.');
+    return 1;
+  }
+  if (!power.handler) {
     console.error(`ogma ${cmd}: not built yet — arrives in batch ${power.batch}.`);
     console.error('OGMA ships complete; unbuilt powers refuse to pretend.');
     return 1;
   }
-  if (cmd === 'init') return cmdInit(process.cwd());
-  // Unreachable while init is the only built power; kept explicit for later batches.
-  console.error(`ogma ${cmd}: no handler wired`);
-  return 1;
+  return power.handler(process.cwd());
 }
 
-process.exit(main(process.argv));
+// exitCode, not process.exit: exit() discards queued stdout on pipes.
+process.exitCode = main(process.argv);

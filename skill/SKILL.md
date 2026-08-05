@@ -14,9 +14,11 @@ description: "OGMA — One Graph, Many Audiences. Read a codebase once into a re
 ## What OGMA is (when complete)
 
 Point OGMA at a codebase. It reads once and inscribes one internal model — the
-**Ogham** — where every fact carries **receipts**: file:line + symbol citations
-verified by deterministic code, never by a model. Then it renders that one model
-for every audience:
+**Ogham** — where every fact carries **receipts** (file:line + symbol citations
+verified by deterministic code) and a **witness ruling**: a blind judge, shown
+only the sentence and the cited code, confirms or refutes each statement, and
+non-confirmed facts loop through rewrite-and-recheck until they clear or drop
+to the open-questions ledger. Then it renders that one model for every audience:
 
 - **Engineers** — implementation notes: module chains, safe vs. risky change points
 - **Business readers** — a feature-first PRD: what the user does, what happens, what they see; zero technical vocabulary, enforced by lint
@@ -28,9 +30,10 @@ classified **LIVE** (wired end to end), **DEAD** (unreferenced — never shown t
 business readers), **HALF-BUILT** (partially wired — ledger, never narrated as
 working), or **UNCLEAR** (ledger, with the specific question).
 
-Nothing is "done" until `ogma gate` passes seven deterministic checks and emits
-a certificate. When the code moves, `ogma watch` invalidates only the receipts
-the diff touched and refreshes only those facts — then re-certifies.
+Nothing is "done" until `ogma gate` passes nine deterministic checks and emits
+a certificate — including that every fact holds a fresh CONFIRMED witness
+ruling. When the code moves, `ogma watch` invalidates only the receipts the
+diff touched and refreshes only those facts — then re-certifies.
 
 ## The contract with the host agent
 

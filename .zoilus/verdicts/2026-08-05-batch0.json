@@ -1,0 +1,61 @@
+{
+  "artifact": "OGMA Batch 0 — foundation (schema, validators, CLI, bench, docs)",
+  "reviewed_at": "2026-08-05",
+  "commit": "2325b68",
+  "panel": "5 blind critics, independent agents, artifact+rubric only",
+  "verdict": "FAIL",
+  "confidence": 0.8,
+  "perLens": [
+    {
+      "lens": "spec",
+      "score": 4,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -4,
+      "pass": false
+    },
+    {
+      "lens": "correctness",
+      "score": 4,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -4,
+      "pass": false
+    },
+    {
+      "lens": "security",
+      "score": 5,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -3,
+      "pass": false
+    },
+    {
+      "lens": "code",
+      "score": 5,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -3,
+      "pass": false
+    },
+    {
+      "lens": "edge-cases",
+      "score": 3,
+      "bar": 8,
+      "blocking": 0,
+      "margin": -5,
+      "pass": false
+    }
+  ],
+  "headline_findings": [
+    "path requirement for LIVE behavior/rule facts documented but unenforced; bench codified the violation",
+    "worst-of-facts derived from fact->feature pointer not feature.fact_ids: LIVE feature can list another feature UNCLEAR fact and pass",
+    "validators throw TypeError on null array members instead of returning errors",
+    "non-array features/facts silently coerced to [] — emptied module file certifies clean",
+    "init destroys an existing ledger and reports success when config.json is absent",
+    "empty_reason invariant never implemented; leaklint banned-term list defined nowhere",
+    "symlink-following write in init; receipt.file accepts absolute and traversal paths",
+    "THESIS: receipts verify citation integrity, not statement truth — false statement + valid receipt earns PASS"
+  ],
+  "next": "LOGOS re-forge loop: fix all findings, re-run panel until every lens clears its bar"
+}

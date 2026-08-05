@@ -18,11 +18,12 @@ then renders that one model for every audience:
 | | OGMA |
 |---|---|
 | **Receipts** | Every fact carries a file:line citation, verified by deterministic code — not by a model |
-| **Certificate** | Nothing ships until seven deterministic checks pass; the result is a machine-checkable `certificate.json` |
+| **Witness** | Every sentence is truth-checked by a blind judge against the cited code itself; the miss rate is measured on seeded false statements and published, not hidden |
+| **Certificate** | Nothing ships until nine deterministic checks pass; the result is a machine-checkable `certificate.json` |
 | **Evidence classification** | LIVE / DEAD / HALF-BUILT / UNCLEAR before anything is written up. Dead code never becomes a "feature" in your PRD |
-| **One graph** | The PRD, the impl notes, and the user guide cannot disagree — they render from the same model |
+| **One graph** | The PRD, the impl notes, and the user guide cannot cite different code — every claim in every audience traces to the same fact and the same citation |
 | **Honesty ledger** | What the code can't answer becomes a tracked question, never a hallucinated paragraph |
-| **Local-first** | Runs in your own agent on your own machine. Your code never leaves |
+| **Local-first** | OGMA's CLI is local and never calls a model; the Ogham never leaves your machine. The reading is done by your own agent — wherever you run it |
 | **Surgical refresh** | New commits invalidate only the receipts they touch; only stale facts re-read; output re-certifies |
 
 ## Status
