@@ -18,9 +18,13 @@ works and the benchmark passes; until then everything here is local.
    presence, verdict, and freshness; it never writes one. Every fact carries a
    ruling; a LIVE fact's ruling is CONFIRMED at its verified commit. Anything
    less demotes the fact rather than rendering.
-4. **No third-party tools or client projects in this repo.** No tool names, no
-   client names — in code, comments, docs, or fixtures. Benchmarks run against
-   public open-source fixture repos only.
+4. **No absorbed tools or client projects in this repo.** No client names and
+   no names of the tools OGMA absorbed or competes with — as identity, anywhere:
+   code, comments, docs, fixtures. Benchmarks run against public open-source
+   fixture repos only. Boundary: ecosystem vocabulary used as **detection or
+   rationale data** (framework file names, dependency names, path conventions —
+   the things a terrain scan or a path rule must name to work at all) is
+   allowed and is not identity.
 5. **Renderers read the Ogham, never the repo.** If a renderer needs something
    that is not in the Ogham, the fix is in ingest, not a side-channel read.
 6. **Classification discipline.** Business and guide output carries LIVE facts
@@ -37,6 +41,7 @@ works and the benchmark passes; until then everything here is local.
 bin/ogma.js        CLI entry — command table doubles as the build-status board
 lib/schema.js      Ogham validators + constants (single source of schema truth)
 lib/init.js        The init command (in lib so the bench tests it directly)
+lib/terrain.js     The Eyes — deterministic repo scan into terrain.json (pure core + git shell)
 docs/ogham-schema.md  The data model — update it in the same commit as any schema change
 skill/SKILL.md     The agent-facing skill (junctioned into the user's skills dir)
 benchmarks/run.js  Schema + hostile-shape + init + CLI bench (npm test); gate fixtures join in Batch 5
@@ -45,7 +50,9 @@ benchmarks/run.js  Schema + hostile-shape + init + CLI bench (npm test); gate fi
 ## Verify before claiming
 
 Run `npm test` after any change — it covers the validators (including hostile
-shapes), init against a real temp dir, and CLI process behavior. A schema
-change without a matching `docs/ogham-schema.md` edit in the same commit is a
-defect. Each batch closes with the inline audit-redo cycle AND an independent
-blind review before it may be called done.
+shapes), init and terrain against real temp dirs, and CLI process behavior. A
+schema change without a matching `docs/ogham-schema.md` edit in the same commit
+is a defect. Each batch closes with the inline audit-redo cycle (re-read
+adversarially against spec + done-check, fix, re-audit to zero). The
+independent blind review fires ONCE, on the finished product before ship —
+never on a draft (house rule CHI-R140, 2026-08-06).

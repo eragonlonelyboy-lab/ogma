@@ -7,6 +7,7 @@
 
 const { OGHAM_VERSION } = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
+const { cmdTerrain } = require('../lib/terrain');
 
 const VERSION = require('../package.json').version;
 
@@ -15,6 +16,7 @@ const VERSION = require('../package.json').version;
 // unwired" is structurally impossible: built means handler present.
 const POWERS = [
   { cmd: 'init',      batch: 0, handler: cmdInit, desc: 'Scaffold .ogma/ in the current project (config + Ogham skeleton)' },
+  { cmd: 'terrain',   batch: 1, handler: cmdTerrain, desc: 'Scan the repo at HEAD: surfaces, entry points, module candidates, language stats' },
   { cmd: 'ingest',    batch: 3, desc: 'Read the codebase into the Ogham (terrain -> graph -> sweeps -> witnessed facts)' },
   { cmd: 'map',       batch: 6, desc: 'Render the dashboard + canvas from the Ogham' },
   { cmd: 'explain',   batch: 4, desc: 'Render implementation notes for engineers' },
@@ -40,7 +42,7 @@ function printHelp(out) {
     out(`  ${p.cmd.padEnd(pad)}${p.desc}${status}`);
   }
   out('');
-  out('Docs: docs/ogham-schema.md defines the model. In-development build: only init works.');
+  out('Docs: docs/ogham-schema.md defines the model. In-development build: unbuilt powers say so and exit 1.');
 }
 
 function main(argv) {

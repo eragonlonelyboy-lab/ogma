@@ -12,6 +12,7 @@ const { spawnSync } = require('child_process');
 
 const S = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
+const { cmdTerrain, analyzeTree, mergeTerrain, MIN_MODULE_FILES } = require('../lib/terrain');
 
 let pass = 0, fail = 0;
 
@@ -783,10 +784,30 @@ check('init refuses a symlinked ledger.json instead of writing through it', () =
   fs.unlinkSync(ledger);
   let made = false;
   try { fs.symlinkSync(outside, ledger, 'file'); made = true; } catch { /* privilege */ }
-  if (!made) { console.log('       (file symlinks unavailable on this machine — dir case covers the class)'); return; }
-  const msgs = [];
-  assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init wrote through a symlinked ledger');
-  assert(!fs.existsSync(outside), 'created a file outside the project through the link');
+  if (made) {
+    const msgs = [];
+    assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init wrote through a symlinked ledger');
+    assert(!fs.existsSync(outside), 'created a file outside the project through the link');
+    return;
+  }
+  // File symlinks need privilege on some platforms. That is NOT license to
+  // skip-and-pass (the round-4 mutation run proved this exact check was
+  // decoration here): drive the same code path by making lstat itself report
+  // the ledger as a symlink, so the refusal logic is verified on every machine.
+  const realLstat = fs.lstatSync;
+  fs.lstatSync = (p, ...rest) => {
+    const st = realLstat.call(fs, p, ...rest);
+    if (path.resolve(String(p)) === path.resolve(ledger)) st.isSymbolicLink = () => true;
+    return st;
+  };
+  try {
+    fs.writeFileSync(ledger, JSON.stringify({ questions: [] }));
+    const msgs = [];
+    assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init wrote through a (simulated) symlinked ledger');
+    assert(msgs.join(' ').includes('symlink'), 'refused without naming the reason: ' + msgs.join(' | '));
+  } finally {
+    fs.lstatSync = realLstat;
+  }
 });
 check('init refuses a hostile existing config.json instead of adopting it', () => {
   const dir = tmpdir();
@@ -862,6 +883,245 @@ check('init keeps a valid hand-edited config unchanged', () => {
   assert(fs.readFileSync(p, 'utf8') === before, 'overwrote a valid hand-edited config');
 });
 
+// ---- terrain: the Eyes ----------------------------------------------------
+
+console.log('terrain:');
+
+// Synthetic monorepo. Sizes are arbitrary but distinct so language sums are
+// checkable. The [id] segment is there on purpose: the deny-list made bracket
+// paths citable, so the scan must carry them through to module roots intact.
+const MONO_FILES = {
+  'package.json': JSON.stringify({ name: 'mono', private: true, workspaces: ['apps/*', 'services/*'] }),
+  'apps/web/package.json': JSON.stringify({ name: 'web', main: 'src/main.tsx', dependencies: { react: '18' } }),
+  'apps/web/index.html': '<html>',
+  'apps/web/src/main.tsx': 'boot',
+  'apps/web/src/payments/Pay.tsx': 'pay',
+  'apps/web/src/payments/History.tsx': 'hist',
+  'apps/web/src/profile/Profile.tsx': 'prof',
+  'apps/web/src/profile/Avatar.tsx': 'av',
+  'apps/web/src/promo/[id]/Page.tsx': 'promo1',
+  'apps/web/src/promo/Promo.tsx': 'promo2',
+  'apps/admin/package.json': JSON.stringify({ name: 'admin-console', dependencies: { react: '18' } }),
+  'apps/admin/src/index.tsx': 'boot',
+  'apps/admin/src/users/List.tsx': 'list',
+  'apps/admin/src/users/Edit.tsx': 'edit',
+  'services/api/Api.csproj': '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>',
+  'services/api/Program.cs': 'main',
+  'services/api/Payments/PaymentsController.cs': 'ctl',
+  'services/api/Payments/PaymentsService.cs': 'svc',
+  'services/api/Users/UsersController.cs': 'only-one-file',
+  'services/worker/package.json': JSON.stringify({ name: 'queue-worker' }),
+  'services/worker/src/index.js': 'boot',
+  'services/worker/src/jobs/a.js': 'a',
+  'services/worker/src/jobs/b.js': 'b',
+  'node_modules/react/package.json': JSON.stringify({ name: 'react' }),
+  'node_modules/react/index.js': 'vendored'
+};
+function treeOf(filesObj) {
+  const entries = Object.entries(filesObj).map(([p, body]) => ({ path: p, size: Buffer.byteLength(body) }));
+  const readText = (p) => Object.prototype.hasOwnProperty.call(filesObj, p) ? filesObj[p] : null;
+  return { entries, readText };
+}
+const MONO = analyzeTree({ ...treeOf(MONO_FILES), projectName: 'mono' });
+
+check('monorepo: four surfaces with correct kinds, workspace root skipped', () => {
+  const byId = Object.fromEntries(MONO.terrain.surfaces.map(s => [s.id, s]));
+  assert(MONO.terrain.surfaces.length === 4, `expected 4 surfaces, got ${MONO.terrain.surfaces.map(s => s.root).join(', ')}`);
+  assert(byId.web && byId.web.kind === 'frontend', 'web not frontend');
+  assert(byId.admin && byId.admin.kind === 'admin-web', 'admin not admin-web');
+  assert(byId.api && byId.api.kind === 'service', 'api not service');
+  assert(byId.worker && byId.worker.kind === 'worker', 'worker not worker');
+  assert(MONO.notes.some(n => n.includes('workspace root')), 'workspace-root skip not noted');
+});
+check('monorepo: module inventory is exactly the expected set', () => {
+  const ids = MONO.terrain.modules.map(m => m.id).sort();
+  // api's Payments dir slugs to "payments", already taken by web -> surface-prefixed.
+  assert(JSON.stringify(ids) === JSON.stringify(['api-payments', 'jobs', 'payments', 'profile', 'promo', 'users']),
+    `module inventory: ${ids.join(', ')}`);
+});
+check('monorepo: sub-threshold directory is excluded and counted, not silently dropped', () => {
+  assert(MIN_MODULE_FILES === 2, 'threshold changed — update docs/ogham-schema.md in the same commit');
+  assert(!MONO.terrain.modules.some(m => m.roots.some(r => r.includes('Users'))), 'one-file dir became a module');
+  assert(MONO.notes.some(n => n.includes('outside every module candidate')), 'unassigned files not reported');
+});
+check('monorepo: bracket path survives into module roots verbatim', () => {
+  const promo = MONO.terrain.modules.find(m => m.id === 'promo');
+  assert(promo && promo.roots[0] === 'apps/web/src/promo', 'promo module missing');
+  assert(S.isSafeRepoPath('apps/web/src/promo/[id]/Page.tsx'), 'bracket path not citable');
+});
+check('monorepo: vendored directories are invisible to surfaces and languages', () => {
+  assert(!MONO.terrain.surfaces.some(s => s.root.includes('node_modules')), 'node_modules became a surface');
+  const vendoredBytes = Buffer.byteLength(MONO_FILES['node_modules/react/index.js']);
+  const jsBytes = Buffer.byteLength(MONO_FILES['services/worker/src/index.js'])
+    + Buffer.byteLength(MONO_FILES['services/worker/src/jobs/a.js'])
+    + Buffer.byteLength(MONO_FILES['services/worker/src/jobs/b.js']);
+  assert(MONO.terrain.languages.js === jsBytes, `js bytes ${MONO.terrain.languages.js} != ${jsBytes} (vendored ${vendoredBytes} must not count)`);
+});
+check('monorepo: entry points come from the manifest first, then well-known names', () => {
+  const byId = Object.fromEntries(MONO.terrain.surfaces.map(s => [s.id, s]));
+  assert(byId.web.entry_points[0] === 'apps/web/src/main.tsx', `web entry: ${byId.web.entry_points[0]}`);
+  assert(byId.api.entry_points.includes('services/api/Program.cs'), `api entries: ${byId.api.entry_points.join(', ')}`);
+  assert(byId.worker.entry_points.includes('services/worker/src/index.js'), `worker entries: ${byId.worker.entry_points.join(', ')}`);
+});
+check('monorepo: scan output passes validateTerrain with zero errors', () => {
+  const e = errorsOf(S.validateTerrain, MONO.terrain);
+  assert(e.length === 0, 'scan wrote an invalid terrain: ' + e.slice(0, 3).join('; '));
+});
+
+check('hostile manifests: broken JSON, traversal/absolute/argv-shaped bins — noted, never thrown, never followed', () => {
+  // "-weird.js" is a real TRACKED file, so tree-membership alone cannot save
+  // us — only the path gate can. That is the layer this check pins.
+  // Both hostile shapes are REAL TRACKED FILES (git tracks argv-shaped and
+  // backslash names happily), so only the intake citability rule stands
+  // between them and the terrain. This check pins that rule.
+  const files = {
+    'a/package.json': '{ not json',
+    'b/package.json': JSON.stringify({ name: 'b', main: '/abs/path.js',
+      bin: { evil: '../../etc/evil', weird: '-weird.js' } }),
+    'b/-weird.js': 'argv-shaped tracked file',
+    'b/back\\slash.js': 'backslash tracked file',
+    'b/src/x.js': 'x', 'b/src/y.js': 'y',
+    'a/src/p.js': 'p', 'a/src/q.js': 'q'
+  };
+  let out;
+  try { out = analyzeTree({ ...treeOf(files), projectName: 'h' }); }
+  catch (e) { throw new Error('analyzeTree THREW on hostile manifests: ' + e.message); }
+  assert(out.notes.some(n => n.includes('unparseable')), 'broken JSON not noted');
+  assert(out.notes.some(n => n.includes('non-citable')), 'uncitable tracked files skipped silently');
+  for (const s of out.terrain.surfaces) {
+    for (const ep of s.entry_points) {
+      assert(S.isSafeRepoPath(ep), `unsafe entry point escaped the gate: ${ep}`);
+    }
+  }
+  assert(errorsOf(S.validateTerrain, out.terrain).length === 0, 'hostile tree produced invalid terrain');
+});
+check('analyzeTree never throws on hostile top-level shapes', () => {
+  try { analyzeTree(); } catch (e) { throw new Error('THREW on no arguments: ' + e.message); }
+  for (const bad of [null, undefined, 42, 'x', {}, { entries: null }, { entries: [null, 7, { path: 9 }] }]) {
+    try { analyzeTree(bad === null || typeof bad !== 'object' ? { entries: bad } : bad); }
+    catch (e) { throw new Error(`THREW on ${JSON.stringify(bad)}: ${e.message}`); }
+  }
+});
+check('flat repo with no manifest: one root surface at ".", fallback module, validates', () => {
+  const files = { 'main.py': 'x', 'util.py': 'y', 'helpers.py': 'z' };
+  const out = analyzeTree({ ...treeOf(files), projectName: 'tool' });
+  assert(out.terrain.surfaces.length === 1 && out.terrain.surfaces[0].root === '.', 'no root surface');
+  assert(out.terrain.surfaces[0].entry_points.includes('main.py'), 'main.py not an entry');
+  assert(out.terrain.modules.length === 1, 'no fallback module');
+  const e = errorsOf(S.validateTerrain, out.terrain);
+  assert(e.length === 0, 'dot-rooted terrain rejected: ' + e.slice(0, 3).join('; '));
+});
+
+check('schema: "." allowed for surface/module roots, still banned in receipts', () => {
+  assert(S.isSafeRepoPathOrDot('.'), '"." rejected as a root');
+  assert(!S.isSafeRepoPathOrDot('..') && !S.isSafeRepoPathOrDot(''), 'traversal/empty accepted');
+  const e = [];
+  S.validateReceipt({ file: '.', line: 1, symbol: 'x' }, e, 't');
+  assert(e.length > 0, 'a receipt citing "." was accepted — a citation names a file');
+});
+
+check('merge: refinements win, new candidates append, languages refresh', () => {
+  const existing = {
+    surfaces: [{ id: 'web', kind: 'frontend', root: 'apps/web', entry_points: ['apps/web/src/main.tsx'] }],
+    modules: [{ id: 'payments', name: 'Payments & Billing', surface_ids: ['web'],
+                roots: ['apps/web/src/payments'], summary: 'Hand-written stakeholder summary.' }],
+    languages: { ts: 1 }
+  };
+  const { terrain: merged, added } = mergeTerrain(existing, MONO.terrain);
+  const pay = merged.modules.find(m => m.id === 'payments');
+  assert(pay.name === 'Payments & Billing' && pay.summary === 'Hand-written stakeholder summary.',
+    'refined module was clobbered by the scan');
+  const web = merged.surfaces.find(s => s.root === 'apps/web');
+  assert(web.id === 'web', 'refined surface replaced');
+  assert(merged.surfaces.length === 4, `merged surfaces: ${merged.surfaces.map(s => s.root).join(', ')}`);
+  assert(merged.modules.some(m => m.id === 'users'), 'new candidate not appended');
+  assert(!added.some(a => a.includes('apps/web/src/payments')), 'covered module re-added');
+  assert(merged.languages.ts === MONO.terrain.languages.ts, 'languages not refreshed from scan');
+  const e = errorsOf(S.validateTerrain, merged);
+  assert(e.length === 0, 'merge produced invalid terrain: ' + e.slice(0, 3).join('; '));
+});
+
+// End-to-end against a real git repo: the Batch 1 done-check.
+function gitIn(dir, args) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+  assert(r.status === 0, `git ${args.join(' ')} failed: ${r.stderr}`);
+  return r.stdout;
+}
+function makeFixtureRepo(filesObj) {
+  const dir = tmpdir();
+  for (const [p, body] of Object.entries(filesObj)) {
+    fs.mkdirSync(path.join(dir, path.dirname(p)), { recursive: true });
+    fs.writeFileSync(path.join(dir, p), body);
+  }
+  gitIn(dir, ['init', '-q']);
+  gitIn(dir, ['add', '-A']);
+  gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'fixture']);
+  return dir;
+}
+check('e2e: terrain scans a real git repo at HEAD and writes a valid terrain.json', () => {
+  const dir = makeFixtureRepo(MONO_FILES);
+  cmdInit(dir, quiet);
+  const msgs = [];
+  assert(cmdTerrain(dir, m => msgs.push(m)) === 0, 'terrain failed: ' + msgs.join(' | '));
+  const t = JSON.parse(fs.readFileSync(path.join(dir, '.ogma/ogham/terrain.json'), 'utf8'));
+  assert(errorsOf(S.validateTerrain, t).length === 0, 'written terrain invalid');
+  const ids = t.modules.map(m => m.id).sort();
+  assert(JSON.stringify(ids) === JSON.stringify(['api-payments', 'jobs', 'payments', 'profile', 'promo', 'users']),
+    `e2e module inventory: ${ids.join(', ')}`);
+  assert(msgs.some(m => m.includes('Wrote .ogma/ogham/terrain.json')), 'no write confirmation');
+});
+check('e2e: scan reads HEAD, not the working tree', () => {
+  const dir = makeFixtureRepo(MONO_FILES);
+  cmdInit(dir, quiet);
+  // Untracked surface: must NOT appear.
+  fs.mkdirSync(path.join(dir, 'apps/untracked'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'apps/untracked/package.json'), JSON.stringify({ name: 'ghost' }));
+  fs.writeFileSync(path.join(dir, 'apps/untracked/a.js'), 'x');
+  assert(cmdTerrain(dir, quiet) === 0, 'terrain failed');
+  const t = JSON.parse(fs.readFileSync(path.join(dir, '.ogma/ogham/terrain.json'), 'utf8'));
+  assert(!t.surfaces.some(s => s.root.includes('untracked')), 'scan read the working tree');
+});
+check('e2e: re-scan preserves a hand-refined terrain and reports nothing new', () => {
+  const dir = makeFixtureRepo(MONO_FILES);
+  cmdInit(dir, quiet);
+  assert(cmdTerrain(dir, quiet) === 0, 'first scan failed');
+  const tp = path.join(dir, '.ogma/ogham/terrain.json');
+  const t = JSON.parse(fs.readFileSync(tp, 'utf8'));
+  t.modules.find(m => m.id === 'payments').summary = 'Paying bills and sending money.';
+  fs.writeFileSync(tp, JSON.stringify(t, null, 2));
+  const msgs = [];
+  assert(cmdTerrain(dir, m => msgs.push(m)) === 0, 're-scan failed');
+  const t2 = JSON.parse(fs.readFileSync(tp, 'utf8'));
+  assert(t2.modules.find(m => m.id === 'payments').summary === 'Paying bills and sending money.',
+    'RE-SCAN CLOBBERED A REFINED SUMMARY');
+  assert(msgs.some(m => m.includes('nothing new to add')), 'merge not reported: ' + msgs.join(' | '));
+});
+check('e2e: terrain refuses an invalid existing terrain.json rather than merging into it', () => {
+  const dir = makeFixtureRepo(MONO_FILES);
+  cmdInit(dir, quiet);
+  fs.writeFileSync(path.join(dir, '.ogma/ogham/terrain.json'), '{ not json');
+  const msgs = [];
+  assert(cmdTerrain(dir, m => msgs.push(m)) === 1, 'merged into garbage');
+  assert(msgs.join(' ').includes('terrain.json'), 'refused without naming the file');
+});
+check('e2e: terrain before init refuses and says to init', () => {
+  const dir = makeFixtureRepo({ 'a.js': 'x' });
+  const msgs = [];
+  assert(cmdTerrain(dir, m => msgs.push(m)) === 1, 'ran without .ogma');
+  assert(msgs.join(' ').includes('ogma init'), 'did not point at init');
+});
+check('e2e: not a git repo / no commits — honest refusal, no crash', () => {
+  const bare = tmpdir();
+  cmdInit(bare, quiet);
+  const msgs = [];
+  assert(cmdTerrain(bare, m => msgs.push(m)) === 1, 'scanned a non-repo');
+  const empty = tmpdir();
+  cmdInit(empty, quiet);
+  gitIn(empty, ['init', '-q']);
+  const msgs2 = [];
+  assert(cmdTerrain(empty, m => msgs2.push(m)) === 1, 'scanned a repo with no commits');
+});
+
 // ---- CLI process-level behavior -------------------------------------------
 
 console.log('cli:');
@@ -870,7 +1130,12 @@ function run(args) { return spawnSync(process.execPath, [BIN, ...args], { encodi
 check('--help exits 0 and lists every power', () => {
   const r = run(['--help']);
   assert(r.status === 0, `exit ${r.status}`);
-  for (const p of ['init', 'ingest', 'gate', 'watch']) assert(r.stdout.includes(p), `help missing ${p}`);
+  for (const p of ['init', 'terrain', 'ingest', 'gate', 'watch']) assert(r.stdout.includes(p), `help missing ${p}`);
+});
+check('help shows terrain as built — no "not built yet" tag on its line', () => {
+  const r = run(['--help']);
+  const line = r.stdout.split('\n').find(l => l.trim().startsWith('terrain'));
+  assert(line && !line.includes('not built yet'), `terrain line: ${line}`);
 });
 check('unbuilt command exits 1 and names its batch', () => {
   const r = run(['prd']);
