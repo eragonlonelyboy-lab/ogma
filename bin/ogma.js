@@ -8,6 +8,7 @@
 const { OGHAM_VERSION } = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
 const { cmdTerrain } = require('../lib/terrain');
+const { cmdGraph } = require('../lib/graph');
 
 const VERSION = require('../package.json').version;
 
@@ -17,6 +18,7 @@ const VERSION = require('../package.json').version;
 const POWERS = [
   { cmd: 'init',      batch: 0, handler: cmdInit, desc: 'Scaffold .ogma/ in the current project (config + Ogham skeleton)' },
   { cmd: 'terrain',   batch: 1, handler: cmdTerrain, desc: 'Scan the repo at HEAD: surfaces, entry points, module candidates, language stats' },
+  { cmd: 'graph',     batch: 2, handler: cmdGraph, desc: 'Index the repo at HEAD: symbol table + call sites (graph/index.json)' },
   { cmd: 'ingest',    batch: 3, desc: 'Read the codebase into the Ogham (terrain -> graph -> sweeps -> witnessed facts)' },
   { cmd: 'map',       batch: 6, desc: 'Render the dashboard + canvas from the Ogham' },
   { cmd: 'explain',   batch: 4, desc: 'Render implementation notes for engineers' },
@@ -72,4 +74,14 @@ function main(argv) {
 }
 
 // exitCode, not process.exit: exit() discards queued stdout on pipes.
-process.exitCode = main(process.argv);
+// A handler may be async (the graph indexer's engine loads WebAssembly);
+// a rejected promise is a defect surfaced honestly, never a silent 0.
+const result = main(process.argv);
+if (result && typeof result.then === 'function') {
+  result.then(
+    code => { process.exitCode = code; },
+    err => { console.error(`ogma failed: ${err.message}`); process.exitCode = 1; }
+  );
+} else {
+  process.exitCode = result;
+}

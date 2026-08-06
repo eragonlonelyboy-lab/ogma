@@ -43,6 +43,7 @@ lib/schema.js      Ogham validators + constants (single source of schema truth)
 lib/init.js        The init command (in lib so the bench tests it directly)
 lib/terrain.js     The Eyes — deterministic repo scan into terrain.json (pure core + git shell)
 lib/verify.js      The receipt verifier — citation integrity at a pinned commit (zero-dep, literal word-boundary match)
+lib/graph.js       The Nerves — WASM tree-sitter symbol/call indexer + query layer (trace, reachability)
 docs/ogham-schema.md  The data model — update it in the same commit as any schema change
 skill/SKILL.md     The agent-facing skill (junctioned into the user's skills dir)
 benchmarks/run.js  Schema + hostile-shape + init + CLI bench (npm test); gate fixtures join in Batch 5

@@ -14,6 +14,7 @@ const S = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
 const { cmdTerrain, analyzeTree, mergeTerrain, MIN_MODULE_FILES } = require('../lib/terrain');
 const V = require('../lib/verify');
+const G = require('../lib/graph');
 
 let pass = 0, fail = 0;
 
@@ -1236,6 +1237,107 @@ check('git reader refuses a non-commitish before it reaches argv', () => {
   assert(threw, 'option-shaped commit accepted into git argv');
 });
 
+// ---- graph: the structural Nerves -----------------------------------------
+
+const GRAPH_FILES = {
+  'src/routes.ts': 'import { payHandler } from "./handlers";\napp.post("/payments", payHandler);\n',
+  'src/handlers.ts': 'export function payHandler(req) {\n  return checkLimits(req.amount);\n}\nconst helper = (x) => transform(x);\n',
+  'src/rules.ts': 'export function checkLimits(x) {\n  return validateDailyLimit(x);\n}\nexport function validateDailyLimit(x) {\n  return x < 500;\n}\nexport function unusedRule(x) { return x; }\n',
+  'src/svc.py': 'class Wallet:\n    def balance(self):\n        return fetch_balance()\n\ndef fetch_balance():\n    return 0\n',
+  'src/Api.cs': 'public class PaymentsController {\n  public void Pay() { Validate(); }\n  private void Validate() {}\n}\n',
+  'README.md': 'not code',
+  'src/huge.js': 'x'
+};
+
+async function checkAsync(name, fn) {
+  try { await fn(); pass++; console.log(`  ok    ${name}`); }
+  catch (e) { fail++; console.error(`  FAIL  ${name} — ${e.message}`); }
+}
+
+async function graphChecks() {
+  console.log('graph:');
+  const entries = Object.entries(GRAPH_FILES).map(([p, body]) =>
+    ({ path: p, size: p === 'src/huge.js' ? G.MAX_PARSE_BYTES + 1 : Buffer.byteLength(body) }));
+  const readText = (p) => Object.prototype.hasOwnProperty.call(GRAPH_FILES, p) ? GRAPH_FILES[p] : null;
+  const { index } = await G.indexTree({ entries, readText, commit: 'abc1234' });
+  const fileOf = (p) => index.files.find(f => f.path === p);
+
+  await checkAsync('multi-language extraction: kinds, lines, containers exact', () => {
+    const cs = fileOf('src/Api.cs');
+    assert(JSON.stringify(cs.symbols.map(s => [s.kind, s.name, s.line, s.container || null])) ===
+      JSON.stringify([['class', 'PaymentsController', 1, null], ['method', 'Pay', 2, 'PaymentsController'], ['method', 'Validate', 3, 'PaymentsController']]),
+      'C# symbols: ' + JSON.stringify(cs.symbols));
+    const py = fileOf('src/svc.py');
+    assert(py.symbols.some(s => s.name === 'balance' && s.container === 'Wallet'), 'python method container lost');
+    assert(py.calls.some(c => c.name === 'fetch_balance' && c.from === 'balance'), 'python call edge lost');
+    const ts = fileOf('src/handlers.ts');
+    assert(ts.symbols.some(s => s.name === 'helper' && s.kind === 'function'), 'arrow binding not indexed');
+  });
+  await checkAsync('route -> handler -> rule traces end to end with hop locations', () => {
+    const t = G.trace(index, '(top)', 'validateDailyLimit');
+    assert(t !== null, 'no chain found');
+    assert(JSON.stringify(t.map(h => h.symbol)) === JSON.stringify(['(top)', 'payHandler', 'checkLimits', 'validateDailyLimit']),
+      'chain: ' + t.map(h => h.symbol).join(' -> '));
+    assert(t[1].file === 'src/routes.ts' && t[1].line === 2, 'handler hop lost its registration site');
+    assert(t[3].file === 'src/rules.ts' && t[3].line === 2, 'rule hop lost its call site');
+  });
+  await checkAsync('a chain that does not exist traces to null, not to a guess', () => {
+    assert(G.trace(index, '(top)', 'ghostRule') === null, 'traced to a symbol that does not exist');
+    assert(G.trace(index, 'unusedRule', 'payHandler') === null, 'traced backwards through a forward edge');
+  });
+  await checkAsync('reachability: dead code is unreached, wired code is reached', () => {
+    const reach = G.reachableFrom(index, ['(top)']);
+    assert(reach.has('validateDailyLimit'), 'live rule unreached');
+    assert(!reach.has('unusedRule'), 'dead rule reported reachable — the LIVE/DEAD signal is broken');
+  });
+  await checkAsync('skipped files are counted by reason, never silently absent', () => {
+    assert(index.skipped.unsupported >= 1, 'README not counted as unsupported');
+    assert(index.skipped.too_large === 1, 'oversized file not counted');
+    assert(!fileOf('src/huge.js'), 'oversized file was parsed anyway');
+  });
+  await checkAsync('indexing is deterministic: same inputs, byte-identical JSON', async () => {
+    const second = await G.indexTree({ entries: [...entries].reverse(), readText, commit: 'abc1234' });
+    assert(JSON.stringify(index) === JSON.stringify(second.index), 'two runs disagree');
+  });
+  await checkAsync('graph validator: clean index passes, planted violations rejected, hostile never throws', () => {
+    assert(errorsOf(S.validateGraphIndex, index).length === 0, 'clean index rejected');
+    for (const bad of [null, 42, {}, { graph_version: 1, commit: null, skipped: {}, files: {} }]) {
+      noThrow(S.validateGraphIndex, bad, 'validateGraphIndex');
+      assert(errorsOf(S.validateGraphIndex, bad).length > 0, `accepted hostile ${JSON.stringify(bad)}`);
+    }
+    const dup = JSON.parse(JSON.stringify(index));
+    dup.files.push(dup.files[0]);
+    assert(errorsOf(S.validateGraphIndex, dup).some(e => e.includes('duplicate')), 'duplicate path accepted');
+    const evil = JSON.parse(JSON.stringify(index));
+    evil.files[0].symbols[0].name = 'bad' + String.fromCharCode(27) + 'name';
+    assert(errorsOf(S.validateGraphIndex, evil).length > 0, 'control-char symbol name accepted');
+  });
+  await checkAsync('e2e: ogma graph indexes a real git repo at HEAD into a valid index.json', async () => {
+    const dir = makeFixtureRepo(GRAPH_FILES);
+    cmdInit(dir, quiet);
+    const msgs = [];
+    assert(await G.cmdGraph(dir, m => msgs.push(m)) === 0, 'graph failed: ' + msgs.join(' | '));
+    const idx = JSON.parse(fs.readFileSync(path.join(dir, '.ogma/ogham/graph/index.json'), 'utf8'));
+    assert(errorsOf(S.validateGraphIndex, idx).length === 0, 'written index invalid');
+    const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+    assert(idx.commit === head, `index commit ${idx.commit} != HEAD ${head}`);
+    assert(G.trace(idx, '(top)', 'validateDailyLimit') !== null, 'chain lost through git round-trip');
+  });
+  await checkAsync('e2e: graph before init refuses', async () => {
+    const dir = makeFixtureRepo({ 'a.js': 'x' });
+    const msgs = [];
+    assert(await G.cmdGraph(dir, m => msgs.push(m)) === 1, 'ran without .ogma');
+    assert(msgs.join(' ').includes('ogma init'), 'did not point at init');
+  });
+}
+
+// The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
+// housekeeping -> summary) runs inside one async main; a stray rejection is a
+// bench failure, never a silent green.
+(async () => {
+
+await graphChecks();
+
 // ---- CLI process-level behavior -------------------------------------------
 
 console.log('cli:');
@@ -1289,3 +1391,8 @@ check('bench leaves no temp directories behind', () => {
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;
+
+})().catch(e => {
+  console.error(`bench crashed: ${e.stack || e.message}`);
+  process.exitCode = 1;
+});

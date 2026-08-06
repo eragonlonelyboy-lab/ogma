@@ -76,6 +76,25 @@ A **surface** is a distinct deployable a person or system runs. `kind`: `fronten
 
 **ID grammar** (enforced by the gate's `integrity` check): features `FEAT-<module>-<slug>`, facts `FACT-<module>-<seq>`, questions `Q-<seq>` — all matching `[A-Za-z0-9-]+`, unique across the whole Ogham.
 
+## graph/index.json — the Nerves
+
+Machine-written by `ogma graph` (`lib/graph.js`), validated by `validateGraphIndex`. The symbol table + call sites for every supported tracked file **at HEAD**, parsed by a WebAssembly engine (pure install, no compiler, no network):
+
+```json
+{
+  "graph_version": 1,
+  "commit": "a1b2c3d",
+  "files": [
+    { "path": "src/handlers.ts", "language": "ts",
+      "symbols": [{ "name": "payHandler", "kind": "function", "line": 1, "end_line": 3 }],
+      "calls":   [{ "name": "checkLimits", "line": 2, "from": "payHandler" }] }
+  ],
+  "skipped": { "unsupported": 3, "too_large": 0, "parse_failed": 0, "unreadable": 0 }
+}
+```
+
+Languages v1: js/jsx, ts, tsx, py, cs, go, java. `calls` carries both real call sites and **reference edges** (a bare identifier passed as an argument — how a route registration hands over its handler; without that edge no route→handler→rule chain exists). `from` is the innermost enclosing symbol, `null` at top level; queries map `null` to the single node `(top)`. Resolution is **by name** — structural, not semantic; two same-named symbols merge in the call graph, which is a documented limit the classifier's ledger absorbs, never silently. Skipped files are counted by reason, never silently absent. Query layer: `definitionsOf` / `callersOf` / `trace` (deterministic shortest chain, `null` when no chain exists) / `reachableFrom` (the raw LIVE/DEAD signal for Batch 3). Symbol names obey the same symbol-shape rule receipts use; every path must be citable.
+
 ## facts/<module>.json — the atoms
 
 ```json
@@ -291,7 +310,7 @@ Per-record and per-file — enforced by `lib/schema.js` (validators report, neve
 5. Feature classification equals worst-of-owned-facts; in-file ID uniqueness.
 6. LIVE behavior/rule facts carry `path`; **any** fact carrying a `path` has every hop receipted and validated, LIVE or not — the demotion lifecycle leaves paths on non-LIVE facts, and an unvalidated hop receipt is the receipt nobody ever verifies.
 7. Every fact carries a witness ruling; a LIVE fact's ruling is CONFIRMED at its `verified_at_commit`.
-8. `manifest`: schema version, a hex `cutoff_commit`, an ISO-8601 UTC `generated_at`, non-negative counts. `terrain`: id grammar and uniqueness on surfaces and modules, known surface kinds, contained roots and entry points, every module `surface_ids` resolving. `raised`: unique ids matching the ID grammar.
+8. `manifest`: schema version, a hex `cutoff_commit`, an ISO-8601 UTC `generated_at`, non-negative counts. `terrain`: id grammar and uniqueness on surfaces and modules, known surface kinds, contained roots and entry points, every module `surface_ids` resolving. `raised`: unique ids matching the ID grammar. `graph`: version, null-or-hex commit, citable unique paths, symbol-shaped names, line bounds, non-negative skip counts.
 
 Global cross-file — enforced by the gate's `integrity` check: the Ogham is bound to repo HEAD; ID uniqueness across modules; every `ledger_refs` id resolves in `ledger.json`; `out/` matches the document contract; non-LIVE facts absent from business/guide renders.
 

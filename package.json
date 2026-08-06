@@ -3,15 +3,45 @@
   "version": "0.0.2",
   "private": true,
   "description": "One Graph, Many Audiences. OGMA reads a codebase once into a receipt-backed model, then renders it for every audience: engineers, stakeholders, end users. Nothing ships without a certificate.",
-  "bin": { "ogma": "bin/ogma.js" },
+  "bin": {
+    "ogma": "bin/ogma.js"
+  },
   "scripts": {
     "test": "node benchmarks/run.js",
     "bench": "node benchmarks/run.js"
   },
-  "engines": { "node": ">=18" },
-  "keywords": ["claude-code", "agents", "documentation", "prd", "codebase", "certification", "receipts", "knowledge-graph"],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "agents",
+    "documentation",
+    "prd",
+    "codebase",
+    "certification",
+    "receipts",
+    "knowledge-graph"
+  ],
   "author": "Eragon Lee (Demiurge)",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/eragonlonelyboy-lab/ogma" },
-  "files": ["bin", "lib", "docs", "skill"]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eragonlonelyboy-lab/ogma"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "docs",
+    "skill"
+  ],
+  "dependencies": {
+    "tree-sitter-c-sharp": "^0.23.5",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-java": "^0.23.5",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "web-tree-sitter": "^0.26.11"
+  }
 }
