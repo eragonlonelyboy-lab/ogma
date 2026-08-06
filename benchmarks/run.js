@@ -13,6 +13,7 @@ const { spawnSync } = require('child_process');
 const S = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
 const { cmdTerrain, analyzeTree, mergeTerrain, MIN_MODULE_FILES } = require('../lib/terrain');
+const V = require('../lib/verify');
 
 let pass = 0, fail = 0;
 
@@ -1120,6 +1121,119 @@ check('e2e: not a git repo / no commits — honest refusal, no crash', () => {
   gitIn(empty, ['init', '-q']);
   const msgs2 = [];
   assert(cmdTerrain(empty, m => msgs2.push(m)) === 1, 'scanned a repo with no commits');
+});
+
+// ---- receipt verifier: the deterministic Nerves ---------------------------
+
+console.log('verify:');
+
+const SRC = [
+  'import { limits } from "./limits";',          // 1
+  '',                                            // 2
+  'export function validateDailyLimit(x) {',     // 3
+  '  return x < limits.daily;',                  // 4
+  '}',                                           // 5
+  '',                                            // 6
+  'export class PaymentsService {',              // 7
+  '  pay(amount) { return validateDailyLimit(amount); }', // 8
+  '}'                                            // 9
+].join('\n');
+const readFixture = (p) => p === 'src/payments/service.ts' ? SRC : null;
+const rc = (over) => ({ file: 'src/payments/service.ts', line: 3, symbol: 'validateDailyLimit', ...over });
+
+check('clean receipt verifies', () => {
+  const v = V.verifyReceipt(rc(), readFixture);
+  assert(v.ok === true, `rejected a true citation: ${v.reason} ${v.detail}`);
+});
+check('planted fakes are rejected, each with its named reason', () => {
+  const cases = [
+    [rc({ file: 'src/payments/ghost.ts' }), 'missing-file'],
+    [rc({ line: 40 }), 'bad-line'],
+    [rc({ symbol: 'validateMonthlyLimit' }), 'symbol-not-found'],
+    [rc({ file: '../etc/passwd' }), 'invalid-receipt'],
+    [rc({ line: 0 }), 'invalid-receipt']
+  ];
+  for (const [receipt, reason] of cases) {
+    const v = V.verifyReceipt(receipt, readFixture);
+    assert(v.ok === false && v.reason === reason, `expected ${reason}, got ${v.ok ? 'PASS' : v.reason}`);
+  }
+});
+check('a substring is not the symbol — whole-word only', () => {
+  const v = V.verifyReceipt(rc({ symbol: 'Limit' }), readFixture);
+  assert(v.ok === false && v.reason === 'symbol-not-found', 'verified "Limit" against "validateDailyLimit"');
+  const v2 = V.verifyReceipt(rc({ symbol: 'validate' }), readFixture);
+  assert(v2.ok === false, 'verified "validate" as a prefix substring');
+});
+check('drift window: within ±5 verifies, one past it does not', () => {
+  // PaymentsService appears exactly ONCE (line 7) — the drift probe needs a
+  // symbol with a single occurrence, or a second occurrence inside the window
+  // silently rescues the out-of-drift case (which is how this check first
+  // shipped wrong).
+  assert(V.verifyReceipt(rc({ line: 2, symbol: 'PaymentsService' }), readFixture).ok === true,
+    'line 2 (drift +5 reaches 7) rejected');
+  assert(V.verifyReceipt(rc({ line: 1, symbol: 'PaymentsService' }), readFixture).ok === false,
+    'line 1 (drift +5 reaches only 6) accepted');
+  // ...and the FLOOR side, with 'import' (single occurrence, line 1): a
+  // mutant that unclamps `lo` floats every window back to the file start and
+  // both hi-side probes above still pass — this pair is what catches it.
+  assert(V.verifyReceipt(rc({ line: 6, symbol: 'import' }), readFixture).ok === true,
+    'line 6 (drift -5 reaches 1) rejected');
+  assert(V.verifyReceipt(rc({ line: 7, symbol: 'import' }), readFixture).ok === false,
+    'line 7 (drift -5 reaches only 2) accepted — the window floor is not being enforced');
+  assert(S.RECEIPT_DRIFT_WINDOW === 5, 'drift window changed — update this check and the docs');
+});
+check('CRLF and LF content verify identically', () => {
+  const crlf = (p) => p === 'src/payments/service.ts' ? SRC.replace(/\n/g, '\r\n') : null;
+  assert(V.verifyReceipt(rc(), crlf).ok === true, 'CRLF blob rejected');
+  assert(V.verifyReceipt(rc({ line: 40 }), crlf).ok === false, 'CRLF line count drifted');
+});
+check('real-world symbol shapes verify: operator==, #private, non-ASCII', () => {
+  const files = {
+    'a.cpp': 'bool operator==(const T& a, const T& b) { return a.v == b.v; }',
+    'b.js': 'class W { #balance = 0; get balance() { return this.#balance; } }',
+    'c.py': 'def プロフィール(user):\n    return user'
+  };
+  const read = (p) => files[p] || null;
+  assert(V.verifyReceipt({ file: 'a.cpp', line: 1, symbol: 'operator==' }, read).ok, 'operator== rejected');
+  assert(V.verifyReceipt({ file: 'b.js', line: 1, symbol: '#balance' }, read).ok, '#private rejected');
+  assert(V.verifyReceipt({ file: 'c.py', line: 1, symbol: 'プロフィール' }, read).ok, 'non-ASCII rejected');
+  assert(V.verifyReceipt({ file: 'c.py', line: 1, symbol: 'プロフィ' }, read).ok === false, 'non-ASCII substring verified');
+});
+check('oversized file fails with its own reason, never an unbounded read', () => {
+  const read = () => ({ toolarge: true });
+  const v = V.verifyReceipt(rc(), read);
+  assert(v.ok === false && v.reason === 'file-too-large', `got ${v.reason}`);
+});
+check('batch: counts, caching, hostile shapes', () => {
+  let reads = 0;
+  const counting = (p) => { reads++; return readFixture(p); };
+  const batch = V.verifyReceipts([rc(), rc({ line: 4, symbol: 'limits' }), rc({ symbol: 'nope' })], counting);
+  assert(batch.total === 3 && batch.failed === 1 && batch.ok === false, `total ${batch.total} failed ${batch.failed}`);
+  assert(reads === 1, `file read ${reads} times for 3 receipts in one file`);
+  const hostile = V.verifyReceipts(null, readFixture);
+  assert(hostile.total === 0 && hostile.ok === false, 'null batch reported as verified');
+  const empty = V.verifyReceipts([], readFixture);
+  assert(empty.total === 0 && empty.failed === 0, 'empty batch miscounted');
+});
+check('e2e: git reader verifies at the PINNED commit, not at HEAD', () => {
+  const dir = makeFixtureRepo({ 'src/service.js': 'function validateDailyLimit(x) { return x < 500; }\n' });
+  const c1 = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+  // The function is renamed at HEAD; the receipt was written at c1.
+  fs.writeFileSync(path.join(dir, 'src/service.js'), 'function checkLimit(x) { return x < 500; }\n');
+  gitIn(dir, ['add', '-A']);
+  gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'rename']);
+  const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+  const receipt = { file: 'src/service.js', line: 1, symbol: 'validateDailyLimit' };
+  assert(V.verifyReceipt(receipt, V.makeGitReader(dir, c1)).ok === true, 'true citation rejected at its own commit');
+  const atHead = V.verifyReceipt(receipt, V.makeGitReader(dir, head));
+  assert(atHead.ok === false && atHead.reason === 'symbol-not-found', 'stale citation still verified at HEAD — invalidation is blind');
+  const ghost = V.verifyReceipt({ file: 'src/ghost.js', line: 1, symbol: 'x' }, V.makeGitReader(dir, c1));
+  assert(ghost.ok === false && ghost.reason === 'missing-file', 'missing file not named');
+});
+check('git reader refuses a non-commitish before it reaches argv', () => {
+  let threw = false;
+  try { V.makeGitReader('.', '--output=evil'); } catch { threw = true; }
+  assert(threw, 'option-shaped commit accepted into git argv');
 });
 
 // ---- CLI process-level behavior -------------------------------------------
