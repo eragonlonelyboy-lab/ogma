@@ -95,6 +95,14 @@ Machine-written by `ogma graph` (`lib/graph.js`), validated by `validateGraphInd
 
 Languages v1: js/jsx, ts, tsx, py, cs, go, java. `calls` carries both real call sites and **reference edges** (a bare identifier passed as an argument — how a route registration hands over its handler; without that edge no route→handler→rule chain exists). `from` is the innermost enclosing symbol, `null` at top level; queries map `null` to the single node `(top)`. Resolution is **by name** — structural, not semantic; two same-named symbols merge in the call graph, which is a documented limit the classifier's ledger absorbs, never silently. Skipped files are counted by reason, never silently absent. Query layer: `definitionsOf` / `callersOf` / `trace` (deterministic shortest chain, `null` when no chain exists) / `reachableFrom` (the raw LIVE/DEAD signal for Batch 3) / `impactOf` (transitive reverse reachability — what breaks when this changes). Symbol names obey the same symbol-shape rule receipts use; every path must be citable.
 
+## Witness excerpts — the derivation rule
+
+The excerpts a witness is shown, and the bytes `witness.input_hash` binds, are **derived, not chosen**: one block per entry in the fact's `receipts` (path-hop receipts are NOT included), the cited file at the fact's `verified_at_commit` (HEAD when absent), lines `line..end_line` inclusive with **no drift widening** — the judge sees exactly what is cited, not the neighborhood — newlines normalized to `\n`, no other transformation. `lib/witness.js` (`deriveExcerpts`, `factInputHash`) is the executable form of this rule; `ogma ingest` recomputes the hash from it, so a ruling whose statement, receipts, or cited code do not reproduce the stored hash is rejected as forged or stale. This paragraph and that file change together.
+
+## ingest — the deterministic bookend
+
+`ogma ingest` never reads code into prose (the CLI is zero-LLM); it proves a completed read is structurally whole: every Ogham file validates; facts↔terrain reconcile in **both** directions (an orphaned facts file, or a terrain module with no facts file, is documentation silently missing); ids are globally unique; every `ledger_refs` and raised id resolves; every receipt (fact, path-hop, and ledger-question) verifies against the repo — graph-backed when the graph is current for that fact's commit, text-backed otherwise; and every witness `input_hash` recomputes. A stale graph refuses with the fix named. On success it writes `manifest.json` bound to HEAD; on any finding it names everything and writes nothing. LIVE facts whose whole path is unreachable in the graph are surfaced as warnings — a contradiction signal for judgment, not a verdict.
+
 ## facts/<module>.json — the atoms
 
 ```json

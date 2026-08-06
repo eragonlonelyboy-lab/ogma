@@ -15,6 +15,8 @@ const { cmdInit } = require('../lib/init');
 const { cmdTerrain, analyzeTree, mergeTerrain, MIN_MODULE_FILES } = require('../lib/terrain');
 const V = require('../lib/verify');
 const G = require('../lib/graph');
+const W = require('../lib/witness');
+const { cmdIngest } = require('../lib/ingest');
 
 let pass = 0, fail = 0;
 
@@ -1362,12 +1364,167 @@ async function graphChecks() {
   });
 }
 
+// ---- ingest: the deterministic bookend ------------------------------------
+
+// A complete, VALID mini-Ogham on a real git repo. Every planted violation
+// below clones this base and breaks exactly one thing; the forged-hash and
+// mutation cases keep this self-authored fixture honest.
+async function buildWholeOgham() {
+  const dir = makeFixtureRepo(GRAPH_FILES);
+  cmdInit(dir, quiet);
+  const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+  fs.writeFileSync(path.join(dir, '.ogma/ogham/terrain.json'), JSON.stringify({
+    surfaces: [{ id: 'app', kind: 'service', root: '.', entry_points: ['src/routes.ts'] }],
+    modules: [{ id: 'payments', name: 'Payments', surface_ids: ['app'], roots: ['src'], summary: 'Paying and limits.' }],
+    languages: { ts: 1 }
+  }, null, 2));
+  assert(await G.cmdGraph(dir, quiet) === 0, 'fixture graph failed');
+  const reader = V.makeGitReader(dir, head);
+
+  const r1 = [{ file: 'src/rules.ts', line: 4, end_line: 6, symbol: 'validateDailyLimit' }];
+  const s1 = 'Payments over the daily limit are rejected.';
+  const h1 = W.factInputHash(s1, r1, reader);
+  assert(h1.hash, 'fixture hash 1 failed: ' + h1.error);
+  const r2 = [{ file: 'src/rules.ts', line: 7, symbol: 'unusedRule' }];
+  const s2 = 'A spare rule exists with no caller.';
+  const h2 = W.factInputHash(s2, r2, reader);
+  assert(h2.hash, 'fixture hash 2 failed: ' + h2.error);
+
+  const factsDoc = {
+    module: 'payments',
+    features: [{
+      id: 'FEAT-payments-pay', name: 'Pay within the daily limit', classification: 'UNCLEAR',
+      does: 'User submits a payment.', happens: 'The amount is checked against the daily limit.',
+      sees: 'A rejection when over the limit.', fact_ids: ['FACT-payments-001', 'FACT-payments-002']
+    }],
+    facts: [
+      { id: 'FACT-payments-001', feature_id: 'FEAT-payments-pay', kind: 'behavior',
+        statement: s1, classification: 'LIVE', receipts: r1, status: 'fresh', verified_at_commit: head,
+        path: { entry: 'POST /payments', exit: '4xx rejection', chain: [
+          { hop: 'payHandler', receipt: { file: 'src/handlers.ts', line: 1, symbol: 'payHandler' } },
+          { hop: 'checkLimits', receipt: { file: 'src/rules.ts', line: 1, symbol: 'checkLimits' } },
+          { hop: 'validateDailyLimit', receipt: { file: 'src/rules.ts', line: 4, symbol: 'validateDailyLimit' } }
+        ] },
+        witness: { verdict: 'CONFIRMED', checked_at_commit: head, checker: 'bench-blind-1', input_hash: h1.hash } },
+      { id: 'FACT-payments-002', feature_id: 'FEAT-payments-pay', kind: 'state',
+        statement: s2, classification: 'UNCLEAR', receipts: r2, ledger_refs: ['Q-001'],
+        witness: { verdict: 'UNSUPPORTED', checked_at_commit: head, checker: 'bench-blind-1', input_hash: h2.hash } }
+    ]
+  };
+  fs.mkdirSync(path.join(dir, '.ogma/ogham/facts'), { recursive: true });
+  const factsPath = path.join(dir, '.ogma/ogham/facts/payments.json');
+  fs.writeFileSync(factsPath, JSON.stringify(factsDoc, null, 2));
+  fs.writeFileSync(path.join(dir, '.ogma/ogham/ledger.json'), JSON.stringify({ questions: [
+    { id: 'Q-001', question: 'Is unusedRule meant to be wired to a route?', status: 'open',
+      classification_context: 'UNCLEAR', receipts: r2 }
+  ] }, null, 2));
+  fs.writeFileSync(path.join(dir, '.ogma/ogham/raised.json'), JSON.stringify({ raised: ['Q-001'] }, null, 2));
+  return { dir, head, factsPath, factsDoc };
+}
+
+async function ingestChecks() {
+  console.log('ingest:');
+  const base = await buildWholeOgham();
+
+  await checkAsync('a whole Ogham ingests: exit 0, valid manifest, honest counts', async () => {
+    const msgs = [];
+    assert(cmdIngest(base.dir, m => msgs.push(m)) === 0, 'whole Ogham rejected: ' + msgs.join(' | '));
+    const m = JSON.parse(fs.readFileSync(path.join(base.dir, '.ogma/ogham/manifest.json'), 'utf8'));
+    assert(errorsOf(S.validateManifest, m).length === 0, 'manifest invalid');
+    assert(m.counts.facts === 2 && m.counts.features === 1 && m.counts.ledger_open === 1 && m.counts.modules === 1,
+      'counts wrong: ' + JSON.stringify(m.counts));
+    assert(S.sameCommit(m.cutoff_commit, base.head), 'manifest not bound to HEAD');
+  });
+  await checkAsync('a forged witness hash is named, and nothing is written', async () => {
+    const { dir, factsPath, factsDoc } = await buildWholeOgham();
+    const doc = JSON.parse(JSON.stringify(factsDoc));
+    doc.facts[0].witness.input_hash = 'a'.repeat(64);
+    fs.writeFileSync(factsPath, JSON.stringify(doc, null, 2));
+    fs.rmSync(path.join(dir, '.ogma/ogham/manifest.json'), { force: true });
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'forged hash ingested');
+    assert(msgs.join(' ').includes('forged or stale'), 'forgery not named: ' + msgs.join(' | ').slice(0, 300));
+    assert(!fs.existsSync(path.join(dir, '.ogma/ogham/manifest.json')), 'manifest written despite findings');
+  });
+  await checkAsync('editing a statement after its ruling breaks the binding', async () => {
+    const { dir, factsPath, factsDoc } = await buildWholeOgham();
+    const doc = JSON.parse(JSON.stringify(factsDoc));
+    doc.facts[0].statement = 'Payments of any size are accepted.';   // hash left untouched
+    fs.writeFileSync(factsPath, JSON.stringify(doc, null, 2));
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'a reworded statement kept its old ruling');
+    assert(msgs.join(' ').includes('forged or stale'), 'stale binding not named');
+    // ...and the other reuse direction: same statement, same hash, DIFFERENT
+    // cited code. A ruling must not survive being pointed at other evidence.
+    const two = await buildWholeOgham();
+    const doc2 = JSON.parse(JSON.stringify(two.factsDoc));
+    doc2.facts[0].receipts = [{ file: 'src/rules.ts', line: 1, end_line: 3, symbol: 'checkLimits' }];
+    fs.writeFileSync(two.factsPath, JSON.stringify(doc2, null, 2));
+    const msgs2 = [];
+    assert(cmdIngest(two.dir, m => msgs2.push(m)) === 1, 'a ruling survived a receipt swap');
+    assert(msgs2.join(' ').includes('forged or stale'), 'receipt-swap reuse not named');
+  });
+  await checkAsync('a fake citation fails ingest with the verifier reason', async () => {
+    const { dir, factsPath, factsDoc } = await buildWholeOgham();
+    const doc = JSON.parse(JSON.stringify(factsDoc));
+    doc.facts[1].receipts = [{ file: 'src/rules.ts', line: 7, symbol: 'ghostFunction' }];
+    fs.writeFileSync(factsPath, JSON.stringify(doc, null, 2));
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'fake citation ingested');
+    assert(msgs.join(' ').includes('symbol-not-found'), 'verifier reason missing: ' + msgs.join(' | ').slice(0, 300));
+  });
+  await checkAsync('facts <-> terrain reconcile in both directions', async () => {
+    const { dir } = await buildWholeOgham();
+    fs.writeFileSync(path.join(dir, '.ogma/ogham/facts/ghost.json'), JSON.stringify({
+      module: 'ghost', features: [], facts: [], empty_reason: 'planted orphan'
+    }, null, 2));
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'orphan facts file ingested');
+    assert(msgs.join(' ').includes('terrain does not know'), 'orphan direction not named');
+    const two = await buildWholeOgham();
+    fs.rmSync(two.factsPath);
+    const msgs2 = [];
+    assert(cmdIngest(two.dir, m => msgs2.push(m)) === 1, 'missing facts file ingested');
+    assert(msgs2.join(' ').includes('no facts file'), 'missing direction not named');
+  });
+  await checkAsync('dangling ledger_refs and raised ids are findings', async () => {
+    const { dir, factsPath, factsDoc } = await buildWholeOgham();
+    const doc = JSON.parse(JSON.stringify(factsDoc));
+    doc.facts[1].ledger_refs = ['Q-999'];
+    fs.writeFileSync(factsPath, JSON.stringify(doc, null, 2));
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'dangling ledger_ref ingested');
+    assert(msgs.join(' ').includes('resolves to no ledger question'), 'dangling ref not named');
+  });
+  await checkAsync('a stale graph refuses ingest and says how to fix it', async () => {
+    const { dir } = await buildWholeOgham();
+    fs.writeFileSync(path.join(dir, 'newfile.js'), 'function later() {}\n');
+    gitIn(dir, ['add', '-A']);
+    gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'move HEAD']);
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 1, 'stale graph ingested');
+    assert(msgs.join(' ').includes('re-run `ogma graph`'), 'fix not pointed at');
+  });
+  await checkAsync('after HEAD moves: re-graph, and old-commit facts still verify at their own commit', async () => {
+    const { dir, head } = await buildWholeOgham();
+    fs.writeFileSync(path.join(dir, 'newfile.js'), 'function later() {}\n');
+    gitIn(dir, ['add', '-A']);
+    gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'move HEAD']);
+    assert(await G.cmdGraph(dir, quiet) === 0, 're-graph failed');
+    const msgs = [];
+    assert(cmdIngest(dir, m => msgs.push(m)) === 0, 'pinned-commit facts rejected after HEAD moved: ' + msgs.join(' | ').slice(0, 300));
+    const m = JSON.parse(fs.readFileSync(path.join(dir, '.ogma/ogham/manifest.json'), 'utf8'));
+    assert(!S.sameCommit(m.cutoff_commit, head), 'manifest still bound to the old commit');
+  });
+}
+
 // The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
 // housekeeping -> summary) runs inside one async main; a stray rejection is a
 // bench failure, never a silent green.
 (async () => {
 
 await graphChecks();
+await ingestChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
 
