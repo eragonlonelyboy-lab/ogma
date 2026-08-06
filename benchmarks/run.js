@@ -1602,6 +1602,112 @@ async function renderChecks() {
   });
 }
 
+// ---- gate: nine checks and the certificate --------------------------------
+
+async function gateChecks() {
+  console.log('gate:');
+  const GATE = require('../lib/gate');
+
+  // Full pipeline to a certifiable state. map.md is written by the bench as a
+  // placeholder for the Batch 6 slot — the gate checks document EXISTENCE
+  // here (content checks for the map arrive with the map); the without-map
+  // case below pins that the requirement is real, not bypassed.
+  async function certifiable() {
+    const b = await buildWholeOgham();
+    const R = require('../lib/render');
+    assert(cmdIngest(b.dir, quiet) === 0, 'gate fixture: ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'gate fixture: render failed');
+    fs.writeFileSync(path.join(b.dir, '.ogma/out/map.md'), '# Map\n\nArrives with the map power.\n');
+    return b;
+  }
+  const certOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.ogma/certificate.json'), 'utf8'));
+  const failing = (cert, name) => cert.checks.find(c => c.check === name && c.pass === false);
+
+  await checkAsync('a whole, rendered, bound Ogham certifies: PASS, 9/9, certificate validates', async () => {
+    const b = await certifiable();
+    const msgs = [];
+    assert(GATE.cmdGate(b.dir, m => msgs.push(m)) === 0, 'gate failed a certifiable Ogham: ' + msgs.join(' | '));
+    const cert = certOf(b.dir);
+    assert(errorsOf(S.validateCertificate, cert).length === 0, 'certificate invalid');
+    assert(cert.pass === true && cert.checks.length === 9 && cert.checks.every(c => c.pass), 'not 9/9');
+    assert(msgs.some(m => m.includes('PASS')), 'no badge line');
+  });
+  await checkAsync('a missing expected document fails coverage — and the certificate says FAIL', async () => {
+    const b = await certifiable();
+    fs.rmSync(path.join(b.dir, '.ogma/out/map.md'));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'gate passed with a missing document');
+    const cert = certOf(b.dir);
+    assert(cert.pass === false && failing(cert, 'coverage'), 'coverage did not fail');
+    assert(failing(cert, 'coverage').detail.includes('map.md'), 'missing doc not named');
+  });
+  await checkAsync('leaklint: technical vocabulary in the PRD fails; the same word in a code span is exempt', async () => {
+    const b = await certifiable();
+    const prd = path.join(b.dir, '.ogma/out/prd.md');
+    fs.appendFileSync(prd, '\nSee the `endpoint` label on screen.\n');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'a code-span term was counted as a leak');
+    fs.appendFileSync(prd, '\nOur API endpoint returns a JSON payload.\n');
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'a plain technical term passed the lint');
+    const det = failing(certOf(b.dir), 'leaklint').detail;
+    assert(det.includes('endpoint') && det.includes('prd.md'), 'leak not named with its file: ' + det);
+  });
+  await checkAsync('readability is measured per document against config', async () => {
+    const b = await certifiable();
+    const cfgPath = path.join(b.dir, '.ogma/config.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.readability_max_grade = 0.1;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'an impossible grade ceiling still passed');
+    assert(failing(certOf(b.dir), 'readability').detail.includes('grade'), 'grade not reported');
+  });
+  await checkAsync('an annotation that resolves to nothing fails integrity', async () => {
+    const b = await certifiable();
+    fs.appendFileSync(path.join(b.dir, '.ogma/out/prd.md'), '\nGhost claim. <!-- fact:FACT-ghost -->\n');
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'an orphan annotation certified');
+    assert(failing(certOf(b.dir), 'integrity').detail.includes('FACT-ghost'), 'orphan annotation not named');
+  });
+  await checkAsync('an Ogham not bound to HEAD fails integrity', async () => {
+    const b = await certifiable();
+    fs.writeFileSync(path.join(b.dir, 'later.js'), 'x\n');
+    gitIn(b.dir, ['add', '-A']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'drift']);
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'a stale Ogham certified');
+    assert(failing(certOf(b.dir), 'integrity').detail.includes('HEAD'), 'binding failure not named');
+  });
+  await checkAsync('post-ingest tampering is re-caught at the boundary: receipts and witness', async () => {
+    const b = await certifiable();
+    const doc = JSON.parse(JSON.stringify(b.factsDoc));
+    doc.facts[1].receipts = [{ file: 'src/rules.ts', line: 7, symbol: 'ghostFunction' }];
+    fs.writeFileSync(b.factsPath, JSON.stringify(doc, null, 2));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'tampered receipts certified');
+    assert(failing(certOf(b.dir), 'receipts'), 'receipts check did not fail');
+    const c = await certifiable();
+    const doc2 = JSON.parse(JSON.stringify(c.factsDoc));
+    doc2.facts[0].statement = 'Everything is permitted.';
+    fs.writeFileSync(c.factsPath, JSON.stringify(doc2, null, 2));
+    assert(GATE.cmdGate(c.dir, quiet) === 1, 'tampered statement certified');
+    assert(failing(certOf(c.dir), 'witness'), 'witness check did not fail');
+  });
+  await checkAsync('the certificate schema refuses dishonest shapes', async () => {
+    const b = await certifiable();
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'setup gate failed');
+    const cert = certOf(b.dir);
+    const lie = JSON.parse(JSON.stringify(cert));
+    lie.checks[0].pass = false;                       // row fails, topline still true
+    assert(errorsOf(S.validateCertificate, lie).some(e => e.includes('contradicts')), 'topline/row contradiction accepted');
+    const dropped = JSON.parse(JSON.stringify(cert));
+    dropped.checks.pop();                             // quietly one check short
+    assert(errorsOf(S.validateCertificate, dropped).some(e => e.includes('expected all')), 'a dropped check read as clean');
+  });
+  await checkAsync('FK grade behaves: simple prose scores below dense jargon', () => {
+    const simple = GATE.fkGrade('The cat sat on the mat. It was warm. She liked it.');
+    const dense = GATE.fkGrade('Organizational interoperability necessitates comprehensive infrastructural rationalization across heterogeneous implementation methodologies.');
+    assert(simple < 4, `simple prose graded ${simple.toFixed(1)}`);
+    assert(dense > 15, `dense jargon graded ${dense.toFixed(1)}`);
+    assert(GATE.syllables('rationalization') >= 5, 'syllable counter broke');
+  });
+}
+
 // The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
 // housekeeping -> summary) runs inside one async main; a stray rejection is a
 // bench failure, never a silent green.
@@ -1610,6 +1716,7 @@ async function renderChecks() {
 await graphChecks();
 await ingestChecks();
 await renderChecks();
+await gateChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
 

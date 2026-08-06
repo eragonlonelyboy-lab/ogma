@@ -11,6 +11,7 @@ const { cmdTerrain } = require('../lib/terrain');
 const { cmdGraph } = require('../lib/graph');
 const { cmdIngest } = require('../lib/ingest');
 const { cmdPrd, cmdExplain, cmdGuides, cmdQuestions } = require('../lib/render');
+const { cmdGate } = require('../lib/gate');
 
 const VERSION = require('../package.json').version;
 
@@ -29,7 +30,7 @@ const POWERS = [
   { cmd: 'questions', batch: 4, handler: cmdQuestions, desc: 'Render the open-questions ledger' },
   { cmd: 'watch',     batch: 7, desc: 'Diff new commits, invalidate receipts, refresh only stale facts' },
   { cmd: 'push',      batch: 7, desc: 'Deliver rendered artifacts to the configured destination' },
-  { cmd: 'gate',      batch: 5, desc: 'Run the nine checks and emit the certificate' },
+  { cmd: 'gate',      batch: 5, handler: cmdGate, desc: 'Run the nine checks and emit the certificate' },
   { cmd: 'version',   batch: 0, handler: () => { console.log(VERSION); return 0; }, desc: 'Print the version' }
 ];
 

@@ -326,6 +326,22 @@ Global cross-file — enforced by the gate's `integrity` check: the Ogham is bou
 
 Process rules (not machine-checkable in one snapshot, stated as discipline): watch updates facts in place and never renumbers IDs.
 
+## The gate and the certificate
+
+`ogma gate` (`lib/gate.js`) runs nine checks and writes `.ogma/certificate.json` on PASS **and** on FAIL — an honest failing certificate is the product working. Pass conditions, pinned (this prose and the code change together):
+
+1. **coverage** — every document `outDocuments(config, terrain)` expects exists under `out/`, and (when `prd` is enabled) `prd.md` carries a `## <name>` section for every terrain module. Guide exemptions for non-interactive surfaces are recorded in the detail, never counted as gaps.
+2. **receipts** — every receipt on every fact (including path hops) verifies at that fact's own commit; ledger-question receipts verify at HEAD.
+3. **witness** — every fact carries a ruling; LIVE means CONFIRMED; every `input_hash` recomputes from statement + derived excerpts.
+4. **leaklint** — no banned technical vocabulary in `prd.md` or `guides/*.md`, measured on narrative text (annotations stripped, code spans and fences removed, headings dropped), case-insensitive whole-word. `config.leaklint_extra` entries are **literal terms, never regex source** — a regex here would hand pattern syntax and catastrophic backtracking to a config file.
+5. **complete** — LIVE features narrate does/happens/sees; unnarrated features carry `why_not_narrated`.
+6. **ledger** — every raised id resolves; every HALF-BUILT/UNCLEAR fact resolves to a real ledger question.
+7. **orphans** — every module file passes `validateModuleFile` whole (bidirectional feature↔fact links, worst-of-facts rollups, empty_reason).
+8. **readability** — Flesch-Kincaid grade per document (`prd.md`, each `guides/*.md`), on the same narrative text leaklint measures, each ≤ `config.readability_max_grade`. Syllables: vowel-group runs minus a silent trailing `e`, minimum 1. One population, one grade per document — not per line, not per section.
+9. **integrity** — the Ogham is bound to HEAD (`cutoff_commit`), ids are globally unique, and every `<!-- fact:… -->` / `<!-- feature:… -->` annotation in every rendered document resolves to a record in the Ogham — an annotation nothing owns is a fabricated claim wearing a receipt.
+
+The certificate schema (`validateCertificate`) refuses dishonest shapes structurally: a topline `pass` that contradicts its rows, or a certificate quietly one check short, does not validate and is never written.
+
 ## Assumptions and limits (v1, stated not hidden)
 
 - Receipts verify **citation integrity, not statement truth**; the witness pass covers truth and is itself fallible — its measured catch rate ships with every release.
