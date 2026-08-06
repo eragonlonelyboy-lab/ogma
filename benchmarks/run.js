@@ -1323,6 +1323,30 @@ async function graphChecks() {
     assert(idx.commit === head, `index commit ${idx.commit} != HEAD ${head}`);
     assert(G.trace(idx, '(top)', 'validateDailyLimit') !== null, 'chain lost through git round-trip');
   });
+  await checkAsync('symbol-table-backed verification: tightens on mentions, never loosens on ignorance', async () => {
+    // Line 2 MENTIONS validateDailyLimit in a comment; the real definition is
+    // far below, outside the drift window. Text-backed verification passes
+    // (documented limit); graph-backed must reject.
+    const body = '// TODO: validateDailyLimit is called here\n'.repeat(1)
+      + 'const cfg = 1;\n'.repeat(20)
+      + 'export function validateDailyLimit(x) { return x < 500; }\n';
+    const files = { 'src/deep.ts': body };
+    const read = (p) => files[p] || null;
+    const { index: gidx } = await G.indexTree({
+      entries: [{ path: 'src/deep.ts', size: Buffer.byteLength(body) }],
+      readText: read, commit: 'abc1234'
+    });
+    const mention = { file: 'src/deep.ts', line: 1, symbol: 'validateDailyLimit' };
+    assert(V.verifyReceipt(mention, read).ok === true, 'text-backed baseline changed — update this check');
+    const refined = V.verifyReceipt(mention, read, gidx);
+    assert(refined.ok === false && refined.reason === 'symbol-not-found',
+      'graph-backed verification accepted a comment mention as the code');
+    const real = V.verifyReceipt({ file: 'src/deep.ts', line: 22, symbol: 'validateDailyLimit' }, read, gidx);
+    assert(real.ok === true && real.via === 'graph', 'true citation rejected under the graph');
+    // Symbols the graph cannot know (a variable) still verify by text.
+    const variable = V.verifyReceipt({ file: 'src/deep.ts', line: 2, symbol: 'cfg' }, read, gidx);
+    assert(variable.ok === true, "graph ignorance rejected a legitimate receipt — the rule must only tighten");
+  });
   await checkAsync('e2e: graph before init refuses', async () => {
     const dir = makeFixtureRepo({ 'a.js': 'x' });
     const msgs = [];
