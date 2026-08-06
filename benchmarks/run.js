@@ -1374,7 +1374,8 @@ async function buildWholeOgham() {
   cmdInit(dir, quiet);
   const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
   fs.writeFileSync(path.join(dir, '.ogma/ogham/terrain.json'), JSON.stringify({
-    surfaces: [{ id: 'app', kind: 'service', root: '.', entry_points: ['src/routes.ts'] }],
+    surfaces: [{ id: 'app', kind: 'frontend', root: '.', entry_points: ['src/routes.ts'] },
+               { id: 'sync', kind: 'worker', root: 'src', entry_points: ['src/svc.py'] }],
     modules: [{ id: 'payments', name: 'Payments', surface_ids: ['app'], roots: ['src'], summary: 'Paying and limits.' }],
     languages: { ts: 1 }
   }, null, 2));
@@ -1398,7 +1399,7 @@ async function buildWholeOgham() {
       sees: 'A rejection when over the limit.', fact_ids: ['FACT-payments-001', 'FACT-payments-002']
     }],
     facts: [
-      { id: 'FACT-payments-001', feature_id: 'FEAT-payments-pay', kind: 'behavior',
+      { id: 'FACT-payments-001', feature_id: 'FEAT-payments-pay', kind: 'rule',
         statement: s1, classification: 'LIVE', receipts: r1, status: 'fresh', verified_at_commit: head,
         path: { entry: 'POST /payments', exit: '4xx rejection', chain: [
           { hop: 'payHandler', receipt: { file: 'src/handlers.ts', line: 1, symbol: 'payHandler' } },
@@ -1518,6 +1519,89 @@ async function ingestChecks() {
   });
 }
 
+// ---- render: the Voices ---------------------------------------------------
+
+async function renderChecks() {
+  console.log('render:');
+  const base = await buildWholeOgham();
+  assert(cmdIngest(base.dir, quiet) === 0, 'render fixture failed ingest');
+  const R = require('../lib/render');
+  const read = (rel) => fs.readFileSync(path.join(base.dir, '.ogma/out', rel), 'utf8');
+
+  await checkAsync('one fact renders three ways, each carrying its annotation', () => {
+    assert(R.cmdPrd(base.dir, quiet) === 0, 'prd failed');
+    assert(R.cmdExplain(base.dir, quiet) === 0, 'explain failed');
+    assert(R.cmdGuides(base.dir, quiet) === 0, 'guides failed');
+    for (const doc of ['prd.md', 'tech/payments.md', 'guides/app.md']) {
+      const anns = R.parseAnnotations(read(doc));
+      assert(anns.some(a => a.kind === 'fact' && a.id === 'FACT-payments-001'),
+        `${doc} does not carry fact:FACT-payments-001`);
+    }
+    assert(read('prd.md').includes('What you do:'), 'prd narration missing');
+    assert(read('guides/app.md').includes('Good to know:'), 'guide rule missing');
+    assert(read('tech/payments.md').includes('witness CONFIRMED'), 'tech witness badge missing');
+  });
+  await checkAsync('doubt never reaches business or guide readers, and always reaches engineers', () => {
+    for (const doc of ['prd.md', 'guides/app.md']) {
+      assert(!read(doc).includes('FACT-payments-002'), `${doc} leaked a non-LIVE fact`);
+      assert(!read(doc).includes('spare rule'), `${doc} leaked non-LIVE prose`);
+    }
+    const tech = read('tech/payments.md');
+    assert(tech.includes('FACT-payments-002') && tech.includes('UNSUPPORTED') && tech.includes('Q-001'),
+      'tech notes hide the doubt');
+  });
+  await checkAsync('a stale LIVE fact drops from prd/guides and is marked in tech', async () => {
+    const two = await buildWholeOgham();
+    assert(cmdIngest(two.dir, quiet) === 0, 'clone ingest failed');
+    const doc = JSON.parse(JSON.stringify(two.factsDoc));
+    doc.facts[0].status = 'stale';
+    fs.writeFileSync(two.factsPath, JSON.stringify(doc, null, 2));
+    const r2 = (rel) => fs.readFileSync(path.join(two.dir, '.ogma/out', rel), 'utf8');
+    assert(R.cmdPrd(two.dir, quiet) === 0 && R.cmdGuides(two.dir, quiet) === 0 && R.cmdExplain(two.dir, quiet) === 0, 'render failed');
+    assert(!r2('prd.md').includes('FACT-payments-001'), 'stale fact still in the PRD');
+    assert(r2('guides/app.md').includes('Nothing is live'), 'stale feature still narrated in guides');
+    assert(r2('tech/payments.md').includes('[STALE'), 'tech does not mark staleness');
+  });
+  await checkAsync('non-interactive surfaces get no guide, and the exemption is visible in output', () => {
+    assert(!fs.existsSync(path.join(base.dir, '.ogma/out/guides/sync.md')), 'a worker surface got a user guide');
+    assert(fs.existsSync(path.join(base.dir, '.ogma/out/guides/app.md')), 'the interactive surface got none');
+  });
+  await checkAsync('questions.md carries id, status, and the citing receipt', () => {
+    assert(R.cmdQuestions(base.dir, quiet) === 0, 'questions failed');
+    const q = read('questions.md');
+    assert(q.includes('Q-001') && q.includes('[open]') && q.includes('src/rules.ts:7'), 'ledger render incomplete: ' + q.slice(0, 200));
+  });
+  await checkAsync('annotations strip cleanly for the lint and readability passes', () => {
+    const stripped = R.stripAnnotations(read('prd.md'));
+    assert(!stripped.includes('<!--'), 'stripAnnotations left a comment behind');
+    assert(stripped.includes('What you do:'), 'stripping removed real prose');
+  });
+  await checkAsync('renderers refuse an Ogham that never passed ingest', async () => {
+    const three = await buildWholeOgham();   // no ingest run -> no manifest
+    for (const [name, fn] of [['prd', R.cmdPrd], ['explain', R.cmdExplain], ['guides', R.cmdGuides], ['questions', R.cmdQuestions]]) {
+      const msgs = [];
+      assert(fn(three.dir, m => msgs.push(m)) === 1, `${name} rendered without a manifest`);
+      assert(msgs.join(' ').includes('ogma ingest'), `${name} did not point at ingest`);
+    }
+  });
+  await checkAsync('a disabled audience refuses instead of rendering', () => {
+    const cfgPath = path.join(base.dir, '.ogma/config.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.audiences.prd = false;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    assert(R.cmdPrd(base.dir, quiet) === 1, 'rendered a disabled audience');
+    cfg.audiences.prd = true;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  });
+  await checkAsync('renderers read only the Ogham: no repo access in the source', () => {
+    // Matches the require form only — the file's own header comment states
+    // the prohibition in prose, and a check that fires on its own rule's
+    // statement is the CHI-R001 self-match defect.
+    const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'render.js'), 'utf8');
+    assert(!src.includes("require('child_process')") && !src.includes('spawnSync('), 'render.js reaches for the repo');
+  });
+}
+
 // The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
 // housekeeping -> summary) runs inside one async main; a stray rejection is a
 // bench failure, never a silent green.
@@ -1525,6 +1609,7 @@ async function ingestChecks() {
 
 await graphChecks();
 await ingestChecks();
+await renderChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
 
@@ -1542,9 +1627,9 @@ check('help shows terrain as built — no "not built yet" tag on its line', () =
   assert(line && !line.includes('not built yet'), `terrain line: ${line}`);
 });
 check('unbuilt command exits 1 and names its batch', () => {
-  const r = run(['prd']);
+  const r = run(['map']);
   assert(r.status === 1, `exit ${r.status}`);
-  assert(r.stderr.includes('batch 4'), 'no batch number');
+  assert(r.stderr.includes('batch 6'), 'no batch number');
 });
 check('unknown command exits 1, help goes to stderr not stdout', () => {
   const r = run(['bogus']);

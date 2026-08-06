@@ -10,6 +10,7 @@ const { cmdInit } = require('../lib/init');
 const { cmdTerrain } = require('../lib/terrain');
 const { cmdGraph } = require('../lib/graph');
 const { cmdIngest } = require('../lib/ingest');
+const { cmdPrd, cmdExplain, cmdGuides, cmdQuestions } = require('../lib/render');
 
 const VERSION = require('../package.json').version;
 
@@ -22,10 +23,10 @@ const POWERS = [
   { cmd: 'graph',     batch: 2, handler: cmdGraph, desc: 'Index the repo at HEAD: symbol table + call sites (graph/index.json)' },
   { cmd: 'ingest',    batch: 3, handler: cmdIngest, desc: 'Check a completed read: schemas, facts<->terrain, receipts, witness binding; writes the manifest' },
   { cmd: 'map',       batch: 6, desc: 'Render the dashboard + canvas from the Ogham' },
-  { cmd: 'explain',   batch: 4, desc: 'Render implementation notes for engineers' },
-  { cmd: 'prd',       batch: 4, desc: 'Render the feature-first PRD for business readers' },
-  { cmd: 'guides',    batch: 4, desc: 'Render click-by-click user guides per surface' },
-  { cmd: 'questions', batch: 4, desc: 'Show the open-questions ledger' },
+  { cmd: 'explain',   batch: 4, handler: cmdExplain, desc: 'Render implementation notes for engineers' },
+  { cmd: 'prd',       batch: 4, handler: cmdPrd, desc: 'Render the feature-first PRD for business readers' },
+  { cmd: 'guides',    batch: 4, handler: cmdGuides, desc: 'Render click-by-click user guides per surface' },
+  { cmd: 'questions', batch: 4, handler: cmdQuestions, desc: 'Render the open-questions ledger' },
   { cmd: 'watch',     batch: 7, desc: 'Diff new commits, invalidate receipts, refresh only stale facts' },
   { cmd: 'push',      batch: 7, desc: 'Deliver rendered artifacts to the configured destination' },
   { cmd: 'gate',      batch: 5, desc: 'Run the nine checks and emit the certificate' },

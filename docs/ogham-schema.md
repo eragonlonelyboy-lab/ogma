@@ -254,6 +254,8 @@ Rules that make the set checkable:
 - The set is exhaustive in both directions: a document listed here and missing fails `coverage`; a file in `out/` that is not listed here fails `integrity`.
 - `worker` and `service` surfaces produce no guide, and the certificate's `coverage` detail records the exemption rather than counting it as a gap.
 
+**The fact-ID annotation** (the traceability syntax three gate checks parse): a rendered claim line ends with `<!-- fact:FACT-x -->`; a feature heading ends with `<!-- feature:FEAT-x -->`. That HTML-comment form is the ENTIRE syntax — one regex (`ANNOTATION_RX` in `lib/render.js`) defines it, `parseAnnotations` reads it, and `stripAnnotations` is the single implementation the leak lint and the readability check use to remove annotations before scanning prose. Annotations are invisible in rendered markdown, so business and guide readers never see them; the gate uses them to prove every rendered claim traces to a fact and no fact id is orphaned. Renderers (`lib/render.js`) are deterministic assemblers of prose authored at ingest — they read only the Ogham (no git, no repo access), gate every audience through `rendersTo`, and require a manifest (a passed `ogma ingest`) before anything renders.
+
 ## The leak lint
 
 Business (`prd`) and guide output must contain zero technical vocabulary. The base banned-term list ships in `lib/schema.js` (`LEAKLINT_BASE`, ~35 terms: endpoint, api, dto, middleware, …); `config.leaklint_extra` **adds** terms. Matching: case-insensitive, word-boundary, on prose only — text inside inline code spans and fenced code blocks is exempt. The base list is a curated default, extended as real leaks are found.
