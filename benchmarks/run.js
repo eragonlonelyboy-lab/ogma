@@ -1290,6 +1290,13 @@ async function graphChecks() {
     assert(reach.has('validateDailyLimit'), 'live rule unreached');
     assert(!reach.has('unusedRule'), 'dead rule reported reachable — the LIVE/DEAD signal is broken');
   });
+  await checkAsync('impact is transitive: changing the rule reaches the route, not just its caller', () => {
+    const impact = G.impactOf(index, 'validateDailyLimit');
+    assert(impact.has('checkLimits'), 'direct caller missing from impact');
+    assert(impact.has('payHandler') && impact.has('(top)'), 'transitive impact stopped at the direct caller');
+    assert(!impact.has('validateDailyLimit'), 'a symbol impacts itself');
+    assert(!impact.has('unusedRule'), 'an unrelated symbol appears in the impact set');
+  });
   await checkAsync('skipped files are counted by reason, never silently absent', () => {
     assert(index.skipped.unsupported >= 1, 'README not counted as unsupported');
     assert(index.skipped.too_large === 1, 'oversized file not counted');

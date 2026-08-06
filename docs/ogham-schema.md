@@ -24,7 +24,7 @@ All paths everywhere in the Ogham are **repo-relative POSIX paths from `manifest
   ogham/
     manifest.json      # repo identity, cut-off commit, counts, schema version
     terrain.json       # surfaces, modules, entry points, language stats
-    graph/             # symbol/edge index — shape defined in Batch 2 (docs/graph-schema.md, not yet written)
+    graph/index.json   # symbol table + call sites (see graph/index.json section below)
     raised.json        # flag IDs raised during reading, written BEFORE ledger authoring
     facts/<module>.json  # one file per module: features + facts + receipts + witness rulings
     ledger.json        # open questions: ambiguity never silently resolved
@@ -93,7 +93,7 @@ Machine-written by `ogma graph` (`lib/graph.js`), validated by `validateGraphInd
 }
 ```
 
-Languages v1: js/jsx, ts, tsx, py, cs, go, java. `calls` carries both real call sites and **reference edges** (a bare identifier passed as an argument — how a route registration hands over its handler; without that edge no route→handler→rule chain exists). `from` is the innermost enclosing symbol, `null` at top level; queries map `null` to the single node `(top)`. Resolution is **by name** — structural, not semantic; two same-named symbols merge in the call graph, which is a documented limit the classifier's ledger absorbs, never silently. Skipped files are counted by reason, never silently absent. Query layer: `definitionsOf` / `callersOf` / `trace` (deterministic shortest chain, `null` when no chain exists) / `reachableFrom` (the raw LIVE/DEAD signal for Batch 3). Symbol names obey the same symbol-shape rule receipts use; every path must be citable.
+Languages v1: js/jsx, ts, tsx, py, cs, go, java. `calls` carries both real call sites and **reference edges** (a bare identifier passed as an argument — how a route registration hands over its handler; without that edge no route→handler→rule chain exists). `from` is the innermost enclosing symbol, `null` at top level; queries map `null` to the single node `(top)`. Resolution is **by name** — structural, not semantic; two same-named symbols merge in the call graph, which is a documented limit the classifier's ledger absorbs, never silently. Skipped files are counted by reason, never silently absent. Query layer: `definitionsOf` / `callersOf` / `trace` (deterministic shortest chain, `null` when no chain exists) / `reachableFrom` (the raw LIVE/DEAD signal for Batch 3) / `impactOf` (transitive reverse reachability — what breaks when this changes). Symbol names obey the same symbol-shape rule receipts use; every path must be citable.
 
 ## facts/<module>.json — the atoms
 
