@@ -48,6 +48,7 @@ lib/witness.js     Witness bookkeeping — excerpt derivation + input_hash recom
 lib/ingest.js      The read's bookend — schemas, facts<->terrain both ways, receipts, witness binding; writes the manifest
 lib/render.js      The Voices — deterministic renderers (prd/tech/guides/questions) + the fact-ID annotation syntax
 lib/gate.js        The Gate — nine checks + certificate emission (leaklint, readability, coverage, binding, annotation resolution)
+lib/map.js         The Map — map.md + self-contained dashboard (map.html, both themes) + canvas export
 docs/ogham-schema.md  The data model — update it in the same commit as any schema change
 skill/SKILL.md     The agent-facing skill (junctioned into the user's skills dir)
 benchmarks/run.js  Schema + hostile-shape + init + CLI bench (npm test); gate fixtures join in Batch 5

@@ -12,6 +12,7 @@ const { cmdGraph } = require('../lib/graph');
 const { cmdIngest } = require('../lib/ingest');
 const { cmdPrd, cmdExplain, cmdGuides, cmdQuestions } = require('../lib/render');
 const { cmdGate } = require('../lib/gate');
+const { cmdMap } = require('../lib/map');
 
 const VERSION = require('../package.json').version;
 
@@ -23,7 +24,7 @@ const POWERS = [
   { cmd: 'terrain',   batch: 1, handler: cmdTerrain, desc: 'Scan the repo at HEAD: surfaces, entry points, module candidates, language stats' },
   { cmd: 'graph',     batch: 2, handler: cmdGraph, desc: 'Index the repo at HEAD: symbol table + call sites (graph/index.json)' },
   { cmd: 'ingest',    batch: 3, handler: cmdIngest, desc: 'Check a completed read: schemas, facts<->terrain, receipts, witness binding; writes the manifest' },
-  { cmd: 'map',       batch: 6, desc: 'Render the dashboard + canvas from the Ogham' },
+  { cmd: 'map',       batch: 6, handler: cmdMap, desc: 'Render the dashboard (map.html, both themes) + map.md + canvas export' },
   { cmd: 'explain',   batch: 4, handler: cmdExplain, desc: 'Render implementation notes for engineers' },
   { cmd: 'prd',       batch: 4, handler: cmdPrd, desc: 'Render the feature-first PRD for business readers' },
   { cmd: 'guides',    batch: 4, handler: cmdGuides, desc: 'Render click-by-click user guides per surface' },

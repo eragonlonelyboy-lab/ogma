@@ -326,6 +326,10 @@ Global cross-file — enforced by the gate's `integrity` check: the Ogham is bou
 
 Process rules (not machine-checkable in one snapshot, stated as discipline): watch updates facts in place and never renumbers IDs.
 
+## The map
+
+`ogma map` (`lib/map.js`) writes three artifacts from one Ogham: `out/map.md` (the markdown overview the out-contract expects), `out/map.html` (the dashboard: one self-contained file, zero external requests, light and dark themes, an audience toggle whose three views are **precomputed through the same `rendersTo` rule the renderers use** — the browser never re-implements the rule, so the dashboard cannot disagree with the documents), and `out/map.canvas` (the open JSON Canvas format: surfaces as a top row, module nodes colored by worst classification, module→surface edges; parsed before it is written). Core dashboard content is never animated from opacity 0 — a stalled compositor must never leave it blank.
+
 ## The gate and the certificate
 
 `ogma gate` (`lib/gate.js`) runs nine checks and writes `.ogma/certificate.json` on PASS **and** on FAIL — an honest failing certificate is the product working. Pass conditions, pinned (this prose and the code change together):

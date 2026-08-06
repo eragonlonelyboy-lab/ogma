@@ -1618,7 +1618,7 @@ async function gateChecks() {
     assert(cmdIngest(b.dir, quiet) === 0, 'gate fixture: ingest failed');
     assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
       && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'gate fixture: render failed');
-    fs.writeFileSync(path.join(b.dir, '.ogma/out/map.md'), '# Map\n\nArrives with the map power.\n');
+    assert(require('../lib/map').cmdMap(b.dir, quiet) === 0, 'gate fixture: map failed');
     return b;
   }
   const certOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.ogma/certificate.json'), 'utf8'));
@@ -1708,6 +1708,62 @@ async function gateChecks() {
   });
 }
 
+// ---- map: dashboard + canvas ----------------------------------------------
+
+async function mapChecks() {
+  console.log('map:');
+  const M = require('../lib/map');
+  const b = await buildWholeOgham();
+  const R = require('../lib/render');
+  assert(cmdIngest(b.dir, quiet) === 0 && R.cmdPrd(b.dir, quiet) === 0, 'map fixture setup failed');
+  const read = (rel) => fs.readFileSync(path.join(b.dir, '.ogma/out', rel), 'utf8');
+
+  await checkAsync('map writes all three artifacts and map.md carries the inventory', () => {
+    assert(M.cmdMap(b.dir, quiet) === 0, 'map failed');
+    for (const f of ['map.md', 'map.html', 'map.canvas']) {
+      assert(fs.existsSync(path.join(b.dir, '.ogma/out', f)), `${f} missing`);
+    }
+    const md = read('map.md');
+    assert(md.includes('Payments') && md.includes('2 facts') && md.includes('1 open questions'), 'map.md inventory wrong: ' + md.split('\n')[2]);
+    assert(md.includes('## Modules') && md.includes('## Surfaces'), 'map.md sections missing');
+  });
+  await checkAsync('map.html is self-contained: no external requests of any kind', () => {
+    const html = read('map.html');
+    assert(!/\b(src|href)\s*=\s*"http/i.test(html), 'external src/href found');
+    assert(!html.includes('@import') && !html.includes('fetch(') && !html.includes('XMLHttpRequest'), 'external loading found');
+    assert(html.includes('<style>') && html.includes('<script>'), 'styles/scripts not inlined');
+  });
+  await checkAsync('both themes exist and core content is never opacity-animated', () => {
+    const html = read('map.html');
+    assert(html.includes('[data-theme="dark"]') && html.includes('prefers-color-scheme'), 'theme wiring missing');
+    assert(!/opacity\s*:\s*0/.test(html), 'core content starts invisible — a stalled compositor leaves it blank');
+  });
+  await checkAsync('audience payloads are pre-filtered by the one rendersTo rule', () => {
+    const html = read('map.html');
+    const dataStart = html.indexOf('var DATA = ') + 'var DATA = '.length;
+    const data = JSON.parse(html.slice(dataStart, html.indexOf(';\nvar audience')));
+    const feat = data.modules[0].features[0];
+    assert(feat.facts.tech.some(f => f.id === 'FACT-payments-002'), 'engineer view lost the doubt');
+    assert(!feat.facts.prd.some(f => f.id === 'FACT-payments-002'), 'business payload carries a non-LIVE fact');
+    assert(!feat.facts.guides.some(f => f.id === 'FACT-payments-002'), 'guide payload carries a non-LIVE fact');
+    assert(feat.facts.prd.some(f => f.id === 'FACT-payments-001'), 'business payload lost the LIVE fact');
+    assert(data.certificate === null || typeof data.certificate.pass === 'boolean', 'certificate embed malformed');
+  });
+  await checkAsync('map.canvas parses, links every module to its surfaces, and colors by classification', () => {
+    const canvas = JSON.parse(read('map.canvas'));
+    assert(Array.isArray(canvas.nodes) && Array.isArray(canvas.edges), 'canvas shape wrong');
+    assert(canvas.nodes.some(n => n.id === 'module-payments'), 'module node missing');
+    assert(canvas.nodes.some(n => n.id === 'surface-app'), 'surface node missing');
+    assert(canvas.edges.some(e => e.fromNode === 'module-payments' && e.toNode === 'surface-app'), 'module->surface edge missing');
+  });
+  await checkAsync('map refuses an Ogham that never passed ingest', async () => {
+    const c = await buildWholeOgham();   // no ingest -> no manifest
+    const msgs = [];
+    assert(M.cmdMap(c.dir, m => msgs.push(m)) === 1, 'map rendered unchecked Ogham');
+    assert(msgs.join(' ').includes('ogma ingest'), 'map did not point at ingest');
+  });
+}
+
 // The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
 // housekeeping -> summary) runs inside one async main; a stray rejection is a
 // bench failure, never a silent green.
@@ -1717,6 +1773,7 @@ await graphChecks();
 await ingestChecks();
 await renderChecks();
 await gateChecks();
+await mapChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
 
@@ -1734,9 +1791,9 @@ check('help shows terrain as built — no "not built yet" tag on its line', () =
   assert(line && !line.includes('not built yet'), `terrain line: ${line}`);
 });
 check('unbuilt command exits 1 and names its batch', () => {
-  const r = run(['map']);
+  const r = run(['watch']);
   assert(r.status === 1, `exit ${r.status}`);
-  assert(r.stderr.includes('batch 6'), 'no batch number');
+  assert(r.stderr.includes('batch 7'), 'no batch number');
 });
 check('unknown command exits 1, help goes to stderr not stdout', () => {
   const r = run(['bogus']);
