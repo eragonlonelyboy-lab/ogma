@@ -392,6 +392,14 @@ Process rules (not machine-checkable in one snapshot, stated as discipline): wat
 
 The certificate schema (`validateCertificate`) refuses dishonest shapes structurally: a topline `pass` that contradicts its rows, or a certificate quietly one check short, does not validate and is never written.
 
+## Cross-cutting rules
+
+**Unicode normalization** (`lib/verify.js` is the implementation; this prose and that file change together): macOS writes filenames in NFD while nearly everything else authors NFC, so the same visible name can be two byte sequences. The rule: comparisons between Ogham strings and repo-derived strings (symbol-in-window matches, graph path/symbol equality, watch's changed-file matching) are **NFC-normalized on both sides**, and a git path lookup whose stored bytes miss **retries the NFD and NFC forms** before ruling the file missing. The bytes handed to git for a per-file diff are always the repo's actual name, never a normalized form. `witnessInputHash` deliberately does NOT normalize its inputs — the hash binds the exact bytes the reader returned, and the reader is deterministic.
+
+**Timestamps**: every `generated_at` / `delivered_at` is checked by `isIsoInstant` — ISO-8601 UTC shape AND a real calendar date (month lengths, leap years, hour/minute/second ranges). The shape regex alone accepted `9999-99-99`; `Date.parse` cannot replace the range checks because V8 rolls a day overflow inside a valid month (`2026-02-30` parses as March 2).
+
+**Error amplification**: every validator that iterates arrays (module files, terrain, ledger, graph index, raised, push-state) collects errors through one shared capping wrapper (`cappedErrors`, cap `MAX_ERRORS`) and reports the suppressed count — a hostile file cannot amplify megabytes of input into an unbounded error list, and suppression is never silent.
+
 ## Assumptions and limits (v1, stated not hidden)
 
 - Receipts verify **citation integrity, not statement truth**; the witness pass covers truth and is itself fallible — its measured catch rate ships with every release.

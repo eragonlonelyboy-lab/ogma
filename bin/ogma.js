@@ -5,7 +5,7 @@
 // skill layer's job; proving it is this binary's job.
 'use strict';
 
-const { OGHAM_VERSION } = require('../lib/schema');
+const { OGHAM_VERSION, safe } = require('../lib/schema');
 const { cmdInit } = require('../lib/init');
 const { cmdTerrain } = require('../lib/terrain');
 const { cmdGraph } = require('../lib/graph');
@@ -63,12 +63,14 @@ function main(argv) {
 
   const power = POWERS.find(p => p.cmd === cmd);
   if (!power) {
-    console.error(`Unknown command: ${cmd}`);
+    // argv is attacker-adjacent text (a script, a copy-paste): control bytes
+    // in it must never reach the terminal raw — safe() strips them.
+    console.error(`Unknown command: ${safe(cmd, 60)}`);
     printHelp(console.error);
     return 1;
   }
   if (rest.length > 0 && !power.takesArgs) {
-    console.error(`ogma ${cmd}: unrecognized arguments: ${rest.join(' ')}`);
+    console.error(`ogma ${cmd}: unrecognized arguments: ${rest.map(a => safe(a, 60)).join(' ')}`);
     console.error('This command takes no arguments; refusing rather than silently ignoring them.');
     return 1;
   }

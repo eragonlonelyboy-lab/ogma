@@ -1911,6 +1911,90 @@ async function watchChecks() {
   });
 }
 
+// ---- Batch 0 debt: instants, error caps, unicode, argv --------------------
+
+async function debtChecks() {
+  console.log('batch-0 debt:');
+
+  check('timestamps are real calendar instants — shape alone is not a date', () => {
+    for (const bad of ['9999-99-99T00:00:00Z', '2026-02-30T00:00:00Z', '2026-13-01T00:00:00Z',
+      '2023-02-29T00:00:00Z', '2026-08-07T25:00:00Z', '2026-08-07T12:60:00Z', '2026-00-10T00:00:00Z']) {
+      assert(!S.isIsoInstant(bad), `${bad} accepted`);
+    }
+    for (const good of ['2026-08-07T12:00:00Z', '2024-02-29T00:00:00Z', '2026-12-31T23:59:59.123Z']) {
+      assert(S.isIsoInstant(good), `${good} rejected`);
+    }
+    const m = { ogham_version: 1, project: 'p', repo_root: '.', cutoff_commit: 'a1b2c3d',
+      generated_at: '9999-99-99T00:00:00Z', counts: { surfaces: 0, modules: 0, features: 0, facts: 0, ledger_open: 0 } };
+    assert(errorsOf(S.validateManifest, m).length > 0, 'manifest took an impossible date');
+  });
+
+  check('every array-iterating validator caps error amplification and reports the suppression', () => {
+    const cases = [
+      [S.validateTerrain, { surfaces: Array(5000).fill({ bad: true }), modules: Array(5000).fill({ bad: true }), languages: {} }],
+      [S.validateLedgerFile, { questions: Array(9000).fill({ bad: true }) }],
+      [S.validateGraphIndex, { graph_version: 1, commit: 'a1b2c3d', files: Array(9000).fill({ bad: true }), skipped: {} }],
+      [S.validateRaised, { raised: Array(9000).fill(42) }],
+      [S.validatePushState, { push_state_version: 1, kind: 'markdown-only', commit: 'a1b2c3d',
+        delivered_at: '2026-08-07T00:00:00Z', files: Array(9000).fill({ bad: true }) }],
+      [S.validateCertificate, { certificate_version: 1, project: 'p', commit: 'a1b2c3d',
+        generated_at: '2026-08-07T00:00:00Z', pass: true, checks: Array(9000).fill({ bad: true }) }],
+      [S.validateConfig, { version: 1, project: 'p', audiences: { prd: true, tech: true, guides: true },
+        destination: { kind: null, asked: false }, language: 'en',
+        leaklint_extra: Array(9000).fill(42), readability_max_grade: 10 }]
+    ];
+    for (const [validator, hostile] of cases) {
+      const e = errorsOf(validator, hostile);
+      assert(e.length <= S.MAX_ERRORS + 1, `${validator.name}: ${e.length} errors — amplification uncapped`);
+      assert(e.some(msg => msg.includes('suppressed')), `${validator.name}: suppression is silent`);
+    }
+  });
+
+  check('a symbol in a different normalization form than the code still verifies', () => {
+    const nfdCafe = 'caféRate';  // e + combining acute (NFD)
+    const nfcCafe = 'caféRate';   // precomposed e-acute (NFC)
+    assert(nfdCafe !== nfcCafe && nfdCafe.normalize('NFC') === nfcCafe, 'fixture strings are not a real NFD/NFC pair');
+    const content = `function ${nfdCafe}() {
+  return 1;
+}
+`;
+    const read = (p) => (p === 'src/x.ts' ? content : null);
+    const v = V.verifyReceipt({ file: 'src/x.ts', line: 1, symbol: nfcCafe }, read);
+    assert(v.ok, 'NFC symbol did not match NFD code: ' + (v.detail || v.reason));
+  });
+
+  await checkAsync('a receipt path in a different normalization form than the repo still verifies via git', async () => {
+    const nfdName = 'src/résume.ts';  // NFD on disk and in git
+    const nfcName = 'src/résume.ts';   // NFC in the receipt
+    assert(nfdName !== nfcName && nfdName.normalize('NFC') === nfcName, 'fixture paths are not a real NFD/NFC pair');
+    const dir = makeFixtureRepo({ [nfdName]: `export function tally() {
+  return 0;
+}
+` });
+    const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+    const tracked = gitIn(dir, ['-c', 'core.quotepath=false', 'ls-files']).trim();
+    assert(tracked.length > 0, 'fixture repo has no tracked file');
+    const reader = V.makeGitReader(dir, head);
+    const v = V.verifyReceipt({ file: nfcName, line: 1, symbol: 'tally' }, reader);
+    assert(v.ok, `NFC receipt path did not reach the blob git tracks as "${tracked}": ` + (v.detail || v.reason));
+  });
+
+  check('control bytes in argv never reach the terminal raw', () => {
+    const BIN2 = path.join(__dirname, '..', 'bin', 'ogma.js');
+    // Built from char codes so no raw control byte sits in this source file.
+    const ESC = String.fromCharCode(27);
+    const CR = String.fromCharCode(13);
+    const hostile = 'x' + ESC + '[2K' + CR + 'PASS';
+    const r1 = spawnSync(process.execPath, [BIN2, hostile], { encoding: 'utf8' });
+    assert(r1.status === 1, `unknown-command exit ${r1.status}`);
+    assert(!r1.stderr.includes(ESC), 'unknown-command echo leaks a raw ESC byte');
+    assert(r1.stderr.includes('\\x1b'), 'unknown-command echo not visibly escaped');
+    const r2 = spawnSync(process.execPath, [BIN2, 'init', hostile], { encoding: 'utf8' });
+    assert(r2.status === 1, `extra-args exit ${r2.status}`);
+    assert(!r2.stderr.includes(ESC), 'extra-args echo leaks a raw ESC byte');
+  });
+}
+
 // ---- Batch 7: push — consent, certification, delivery ---------------------
 
 async function pushChecks() {
@@ -2206,6 +2290,7 @@ await renderChecks();
 await gateChecks();
 await mapChecks();
 await watchChecks();
+await debtChecks();
 await pushChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
