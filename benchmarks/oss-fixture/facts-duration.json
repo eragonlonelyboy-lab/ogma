@@ -1,0 +1,487 @@
+{
+  "module": "duration",
+  "features": [
+    {
+      "id": "FEAT-duration-parse-text",
+      "name": "Convert duration text into milliseconds",
+      "classification": "UNCLEAR",
+      "does": "You give a length of time as text, like 2h or 1.5 days.",
+      "happens": "The text is read and multiplied into milliseconds using fixed unit sizes.",
+      "sees": "You get the number of milliseconds back.",
+      "fact_ids": [
+        "FACT-duration-001",
+        "FACT-duration-002",
+        "FACT-duration-003",
+        "FACT-duration-004",
+        "FACT-duration-005",
+        "FACT-duration-010"
+      ]
+    },
+    {
+      "id": "FEAT-duration-format-number",
+      "name": "Turn milliseconds into readable text",
+      "classification": "LIVE",
+      "does": "You give a number of milliseconds.",
+      "happens": "The number is matched to the largest unit of time that fits it.",
+      "sees": "You get short text like 2h, or full words like 2 hours with the long option.",
+      "fact_ids": [
+        "FACT-duration-006",
+        "FACT-duration-007",
+        "FACT-duration-008"
+      ]
+    },
+    {
+      "id": "FEAT-duration-strict-entry",
+      "name": "Strict typed entry point",
+      "classification": "LIVE",
+      "does": "You use the strict entry with a checked duration text.",
+      "happens": "The text is handed to the same conversion the plain entry uses.",
+      "sees": "You get the same number of milliseconds.",
+      "fact_ids": [
+        "FACT-duration-009"
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "FACT-duration-001",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "behavior",
+      "classification": "LIVE",
+      "statement": "A duration written as a number with an optional unit word after it is matched by one pattern, and text that does not fit the pattern is not converted.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 77,
+          "end_line": 84,
+          "symbol": "exec"
+        }
+      ],
+      "path": {
+        "entry": "ms called with a text value",
+        "exit": "the millisecond number",
+        "chain": [
+          {
+            "hop": "ms",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 55,
+              "symbol": "parse"
+            }
+          },
+          {
+            "hop": "parse",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 77,
+              "end_line": 80,
+              "symbol": "exec"
+            }
+          },
+          {
+            "hop": "unit switch",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 98,
+              "symbol": "matchUnit"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "162402b36615277ab076abe24b6d3d87e648e700603686e32eb2bef3cf3938b2"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-002",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "rule",
+      "classification": "LIVE",
+      "statement": "When the text does not match the expected pattern, the result is the special not-a-number value instead of an error.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 82,
+          "end_line": 84,
+          "symbol": "NaN"
+        }
+      ],
+      "path": {
+        "entry": "ms called with text that fits no unit",
+        "exit": "the not-a-number value",
+        "chain": [
+          {
+            "hop": "ms",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 55,
+              "symbol": "parse"
+            }
+          },
+          {
+            "hop": "no-match return",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 82,
+              "end_line": 84,
+              "symbol": "NaN"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "e751ce766733d08b621bf559545f254f8cc0b804e3bb816a17b29ae7e2dd6ca5"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-003",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "rule",
+      "classification": "LIVE",
+      "statement": "Duration text that is empty, not text at all, or longer than 100 characters is rejected with an error.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 72,
+          "end_line": 76,
+          "symbol": "parse"
+        }
+      ],
+      "path": {
+        "entry": "ms called with an empty or oversized text",
+        "exit": "an error naming the length rule",
+        "chain": [
+          {
+            "hop": "ms",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 55,
+              "symbol": "parse"
+            }
+          },
+          {
+            "hop": "length guard",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 72,
+              "end_line": 76,
+              "symbol": "parse"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "074ec5f0cb445c833ef7e2244c18b64ced64ba20bc9f1dc8bca98428227c8f9f"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-004",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "rule",
+      "classification": "LIVE",
+      "statement": "Unit words are recognized whether written in capital or small letters.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 77,
+          "end_line": 80,
+          "symbol": "exec"
+        },
+        {
+          "file": "src/index.ts",
+          "line": 95,
+          "symbol": "toLowerCase"
+        }
+      ],
+      "path": {
+        "entry": "ms called with a unit in any letter case",
+        "exit": "the millisecond number",
+        "chain": [
+          {
+            "hop": "case-blind pattern",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 77,
+              "end_line": 80,
+              "symbol": "exec"
+            }
+          },
+          {
+            "hop": "lower-casing",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 95,
+              "symbol": "toLowerCase"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "9bb353784d7ee42ebc7f577367c2120382f2b962b51d6edc8c3606435f3e21e6"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-005",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "state",
+      "classification": "LIVE",
+      "statement": "A year is counted as 365.25 days, and a month as one twelfth of that year.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 6,
+          "end_line": 7,
+          "symbol": "mo"
+        }
+      ],
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "1e46da084f30e13866d1e58b92a78f159590735c88969716e87e461955af8fd6"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-006",
+      "feature_id": "FEAT-duration-format-number",
+      "kind": "behavior",
+      "classification": "LIVE",
+      "statement": "A number is turned into short text by checking units from largest to smallest and using the first unit the amount reaches.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 163,
+          "end_line": 187,
+          "symbol": "fmtShort"
+        }
+      ],
+      "path": {
+        "entry": "ms called with a number",
+        "exit": "short text like 2h",
+        "chain": [
+          {
+            "hop": "ms",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 57,
+              "symbol": "format"
+            }
+          },
+          {
+            "hop": "format",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 230,
+              "symbol": "fmtShort"
+            }
+          },
+          {
+            "hop": "fmtShort",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 163,
+              "end_line": 187,
+              "symbol": "fmtShort"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "cd8f783acd17cf6769f74d2eade5a5190bbeb45551b6fb0291772fd4a701ac5a"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-007",
+      "feature_id": "FEAT-duration-format-number",
+      "kind": "rule",
+      "classification": "LIVE",
+      "statement": "With the long option, the unit is written as a full word, and an s is added when the amount is at least one and a half times the unit.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 230,
+          "symbol": "fmtLong"
+        },
+        {
+          "file": "src/index.ts",
+          "line": 192,
+          "end_line": 216,
+          "symbol": "fmtLong"
+        },
+        {
+          "file": "src/index.ts",
+          "line": 242,
+          "end_line": 243,
+          "symbol": "isPlural"
+        }
+      ],
+      "path": {
+        "entry": "ms called with a number and the long option",
+        "exit": "text with full unit words",
+        "chain": [
+          {
+            "hop": "format",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 230,
+              "symbol": "fmtLong"
+            }
+          },
+          {
+            "hop": "plural rule",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 242,
+              "end_line": 243,
+              "symbol": "isPlural"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "fde9787a047756ac79786b97f8c903987a84dedddfabd849e855484ce206e320"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-008",
+      "feature_id": "FEAT-duration-format-number",
+      "kind": "rule",
+      "classification": "LIVE",
+      "statement": "A value that is not a finite number is rejected with an error before any formatting happens.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 226,
+          "end_line": 228,
+          "symbol": "isFinite"
+        }
+      ],
+      "path": {
+        "entry": "ms called with an unusable number",
+        "exit": "an error",
+        "chain": [
+          {
+            "hop": "format guard",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 226,
+              "end_line": 228,
+              "symbol": "isFinite"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "fb9746ca2a23c62492f395c0055a0f19178f8fb44c5c0d030b1aa6cb5adcdbf2"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-009",
+      "feature_id": "FEAT-duration-strict-entry",
+      "kind": "behavior",
+      "classification": "LIVE",
+      "statement": "The strict entry point passes its value straight to the same conversion the plain entry uses, adding no logic of its own.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 156,
+          "end_line": 158,
+          "symbol": "parseStrict"
+        }
+      ],
+      "path": {
+        "entry": "parseStrict called with a checked text",
+        "exit": "the millisecond number",
+        "chain": [
+          {
+            "hop": "parseStrict",
+            "receipt": {
+              "file": "src/index.ts",
+              "line": 157,
+              "symbol": "parse"
+            }
+          }
+        ]
+      },
+      "ledger_refs": [],
+      "witness": {
+        "verdict": "CONFIRMED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "2211090efcc35b4f13c67ee04d26138754c6f0462afd48226409d5a758ab8e05"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+      "status": "fresh"
+    },
+    {
+      "id": "FACT-duration-010",
+      "feature_id": "FEAT-duration-parse-text",
+      "kind": "state",
+      "classification": "UNCLEAR",
+      "statement": "A guard for unknown unit words sits after the pattern check, but the pattern only lets known units through, so no input appears able to reach it.",
+      "receipts": [
+        {
+          "file": "src/index.ts",
+          "line": 141,
+          "end_line": 146,
+          "symbol": "matchUnit"
+        }
+      ],
+      "ledger_refs": [
+        "Q-001"
+      ],
+      "witness": {
+        "verdict": "UNSUPPORTED",
+        "checked_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+        "checker": "blind-witness-subagent-v1",
+        "input_hash": "729c9a70421c6945612b140eddc8d97f099753e4fe4a2fc39ec88ac08c786115"
+      },
+      "verified_at_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb"
+    }
+  ]
+}

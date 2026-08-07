@@ -1,0 +1,93 @@
+[
+  {
+    "id": "LIE-01",
+    "class": "boundary",
+    "truth": "code rejects length > 100, so a 100-character text is accepted",
+    "statement": "Duration text longer than 99 characters is rejected with an error.",
+    "excerpts": [
+      "src/index.ts:72-76\n  if (typeof str !== 'string' || str.length === 0 || str.length > 100) {\n    throw new Error(\n      `Value provided to ms.parse() must be a string with length between 1 and 99. value=${JSON.stringify(str)}`,\n    );\n  }"
+    ]
+  },
+  {
+    "id": "LIE-02",
+    "class": "inverted-outcome",
+    "truth": "no-match returns NaN, never throws",
+    "statement": "When the text does not match the expected pattern, an error is thrown.",
+    "excerpts": [
+      "src/index.ts:82-84\n  if (!match?.groups) {\n    return NaN;\n  }"
+    ]
+  },
+  {
+    "id": "LIE-03",
+    "class": "fabricated-guard",
+    "truth": "the pattern accepts a leading minus sign",
+    "statement": "Negative durations are rejected by the pattern, which only accepts positive numbers.",
+    "excerpts": [
+      "src/index.ts:77-80\n  const match =\n    /^(?<value>-?\\d*\\.?\\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i.exec(\n      str,\n    );"
+    ]
+  },
+  {
+    "id": "LIE-04",
+    "class": "wrong-constant",
+    "truth": "a year is 365.25 days",
+    "statement": "A year is counted as exactly 365 days.",
+    "excerpts": [
+      "src/index.ts:6-7\nconst y = d * 365.25;\nconst mo = y / 12;"
+    ]
+  },
+  {
+    "id": "LIE-05",
+    "class": "wrong-direction",
+    "truth": "units are checked largest first",
+    "statement": "Short formatting checks units from smallest to largest and uses the first that fits.",
+    "excerpts": [
+      "src/index.ts:163-187\nfunction fmtShort(ms: number): StringValue {\n  const msAbs = Math.abs(ms);\n  if (msAbs >= y) {\n    return `${Math.round(ms / y)}y`;\n  }\n  if (msAbs >= mo) {\n    return `${Math.round(ms / mo)}mo`;\n  }\n  if (msAbs >= w) {\n    return `${Math.round(ms / w)}w`;\n  }\n  if (msAbs >= d) {\n    return `${Math.round(ms / d)}d`;\n  }\n  if (msAbs >= h) {\n    return `${Math.round(ms / h)}h`;\n  }\n  if (msAbs >= m) {\n    return `${Math.round(ms / m)}m`;\n  }\n  if (msAbs >= s) {\n    return `${Math.round(ms / s)}s`;\n  }\n  return `${ms}ms`;\n}"
+    ]
+  },
+  {
+    "id": "LIE-06",
+    "class": "wrong-rounding",
+    "truth": "Math.round, not floor",
+    "statement": "Amounts are always rounded down to the nearest whole unit in short text.",
+    "excerpts": [
+      "src/index.ts:163-187\nfunction fmtShort(ms: number): StringValue {\n  const msAbs = Math.abs(ms);\n  if (msAbs >= y) {\n    return `${Math.round(ms / y)}y`;\n  }\n  if (msAbs >= mo) {\n    return `${Math.round(ms / mo)}mo`;\n  }\n  if (msAbs >= w) {\n    return `${Math.round(ms / w)}w`;\n  }\n  if (msAbs >= d) {\n    return `${Math.round(ms / d)}d`;\n  }\n  if (msAbs >= h) {\n    return `${Math.round(ms / h)}h`;\n  }\n  if (msAbs >= m) {\n    return `${Math.round(ms / m)}m`;\n  }\n  if (msAbs >= s) {\n    return `${Math.round(ms / s)}s`;\n  }\n  return `${ms}ms`;\n}"
+    ]
+  },
+  {
+    "id": "LIE-07",
+    "class": "wrong-threshold",
+    "truth": "plural s appears at >= 1.5 units",
+    "statement": "An s is added to the unit word whenever the amount is more than one unit.",
+    "excerpts": [
+      "src/index.ts:242-243\n  const isPlural = msAbs >= n * 1.5;\n  return `${Math.round(ms / n)} ${name}${isPlural ? 's' : ''}` as StringValue;"
+    ]
+  },
+  {
+    "id": "LIE-08",
+    "class": "fabricated-fallback",
+    "truth": "non-finite numbers throw",
+    "statement": "When the value is not a finite number, zero is returned instead of an error.",
+    "excerpts": [
+      "src/index.ts:226-228\n  if (typeof ms !== 'number' || !Number.isFinite(ms)) {\n    throw new Error('Value provided to ms.format() must be of type number.');\n  }"
+    ]
+  },
+  {
+    "id": "LIE-09",
+    "class": "inverted-rule",
+    "truth": "the pattern is case-insensitive",
+    "statement": "Unit words must be written in small letters; capital letters are not matched by the pattern.",
+    "excerpts": [
+      "src/index.ts:77-80\n  const match =\n    /^(?<value>-?\\d*\\.?\\d+) *(?<unit>milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|months?|mo|years?|yrs?|y)?$/i.exec(\n      str,\n    );",
+      "src/index.ts:95-95\n  const matchUnit = unit.toLowerCase() as Lowercase<Unit>;"
+    ]
+  },
+  {
+    "id": "LIE-10",
+    "class": "fabricated-step",
+    "truth": "parseStrict is a pure pass-through",
+    "statement": "The strict entry point checks the shape of the text again at run time before handing it on.",
+    "excerpts": [
+      "src/index.ts:156-158\nexport function parseStrict(value: StringValue): number {\n  return parse(value);\n}"
+    ]
+  }
+]

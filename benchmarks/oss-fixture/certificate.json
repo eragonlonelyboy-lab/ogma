@@ -1,0 +1,61 @@
+{
+  "certificate_version": 1,
+  "project": "fixture-ms",
+  "commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+  "generated_at": "2026-08-07T05:47:27Z",
+  "pass": true,
+  "checks": [
+    {
+      "check": "coverage",
+      "pass": true,
+      "detail": "guide-exempt (non-interactive): fixture-ms"
+    },
+    {
+      "check": "receipts",
+      "pass": true,
+      "detail": "all receipts verified"
+    },
+    {
+      "check": "witness",
+      "pass": true,
+      "detail": "every ruling present and bound"
+    },
+    {
+      "check": "leaklint",
+      "pass": true,
+      "detail": "no technical vocabulary reached non-technical readers"
+    },
+    {
+      "check": "complete",
+      "pass": true,
+      "detail": "narration policy holds"
+    },
+    {
+      "check": "ledger",
+      "pass": true,
+      "detail": "every flag filed with an id"
+    },
+    {
+      "check": "orphans",
+      "pass": true,
+      "detail": "module files internally whole"
+    },
+    {
+      "check": "readability",
+      "pass": true,
+      "detail": "prd.md: grade 7.5"
+    },
+    {
+      "check": "integrity",
+      "pass": true,
+      "detail": "bound to 4ff48cec099f, ids unique, annotations resolve"
+    }
+  ],
+  "counts": {
+    "surfaces": 1,
+    "modules": 1,
+    "features": 3,
+    "facts": 10,
+    "ledger_open": 1
+  }
+}

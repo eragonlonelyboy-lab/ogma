@@ -18,7 +18,7 @@ then renders that one model for every audience:
 | | OGMA |
 |---|---|
 | **Receipts** | Every fact carries a file:line citation, verified by deterministic code — not by a model |
-| **Witness** | Every fact's statement is truth-checked by a blind judge against the cited code itself. The miss rate will be measured on seeded false statements and published with each release — **that benchmark is not built yet, so today there is no number and this row is a design commitment, not a result** |
+| **Witness** | Every fact's statement is truth-checked by a blind judge against the cited code itself. Measured on seeded false statements with valid receipts against a public OSS fixture: **10/10 lies caught, 0/9 true statements falsely refuted** ([full record + methodology](benchmarks/oss-fixture/benchmark.md)). The witness is model judgment and can be wrong — which is why this number is measured per release, never assumed |
 | **Certificate** | Nothing ships until nine deterministic checks pass; the result is a machine-checkable `certificate.json` |
 | **Evidence classification** | LIVE / DEAD / HALF-BUILT / UNCLEAR before anything is written up. Dead code never becomes a "feature" in your PRD |
 | **One graph** | The PRD, the impl notes, and the user guide cannot cite different code — every claim in every audience traces to the same fact and the same citation |
@@ -31,14 +31,16 @@ then renders that one model for every audience:
 **In development — pre-release.** Every power is built and benched: read
 (`init`/`terrain`/`graph`/`ingest`), render (`prd`/`explain`/`guides`/
 `questions`/`map`), certify (`gate`), stay current (`watch`), deliver
-(`push`). What remains before release is the proof pass: the public
-OSS-fixture benchmark, the published witness catch rate, and independent
-review. This repo goes public only when that passes — `ogma --help` stays the
-honest per-power status board.
+(`push`). The proof pass has run: a full pipeline execution against a public
+OSS fixture ending in a **PASS 9/9 certificate**, and a published witness
+catch rate — see [benchmarks/oss-fixture/benchmark.md](benchmarks/oss-fixture/benchmark.md).
+What remains before release: independent review and the final ship gate.
+`ogma --help` stays the honest per-power status board.
 
 ```
-npm install    # nothing to install yet beyond node >= 18
+npm install    # node >= 18; parsers are pure-WASM installs, no compiler
 node bin/ogma.js --help
+npm test       # 227 checks: validators, hostile shapes, e2e against real git repos
 ```
 
 ## License

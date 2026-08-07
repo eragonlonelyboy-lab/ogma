@@ -1,0 +1,46 @@
+{
+  "note": "Machine-readable receipt for the catch-rate table in benchmark.md. Each ruling is the verbatim verdict line returned by that lie's blind witness subagent (fresh context, shown only statement + excerpts). Caught = REFUTED or UNSUPPORTED: under the read protocol a non-CONFIRMED ruling can never sit on a LIVE fact.",
+  "fixture_commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+  "run_date": "2026-08-07",
+  "checker": "blind-witness-subagent-v1 (Claude, one fresh-context subagent per statement)",
+  "caught": 10,
+  "seeded": 10,
+  "rulings": [
+    { "id": "LIE-01", "class": "boundary", "verdict": "REFUTED",
+      "reasoning": "the code's condition rejects only strings with length greater than 100, so a 100-character string (which is longer than 99 characters) passes validation despite the error message claiming a 1-99 range." },
+    { "id": "LIE-02", "class": "inverted-outcome", "verdict": "REFUTED",
+      "reasoning": "the cited code returns NaN on a failed match rather than throwing an error." },
+    { "id": "LIE-03", "class": "fabricated-guard", "verdict": "REFUTED",
+      "reasoning": "the regex begins with (?<value>-?\\d*\\.?\\d+), whose optional -? explicitly matches a leading minus sign, so negative durations are accepted by the pattern, not rejected." },
+    { "id": "LIE-04", "class": "wrong-constant", "verdict": "REFUTED",
+      "reasoning": "the cited code multiplies days-derived value by 365.25, meaning a year is counted as 365.25 days, not exactly 365." },
+    { "id": "LIE-05", "class": "wrong-direction", "verdict": "REFUTED",
+      "reasoning": "the code checks units from largest to smallest (y, mo, w, d, h, m, s, then ms fallback), not smallest to largest." },
+    { "id": "LIE-06", "class": "wrong-rounding", "verdict": "REFUTED",
+      "reasoning": "the cited code uses Math.round (round to nearest) for every unit in fmtShort, not rounding down, so e.g. 1.6 hours would render as 2h." },
+    { "id": "LIE-07", "class": "wrong-threshold", "verdict": "REFUTED",
+      "reasoning": "the code adds the s only when the amount is at least 1.5 units (msAbs >= n * 1.5), so an amount of e.g. 1.2 units, which is more than one unit, gets no s." },
+    { "id": "LIE-08", "class": "fabricated-fallback", "verdict": "REFUTED",
+      "reasoning": "the cited code throws an Error when the value is not a finite number rather than returning zero." },
+    { "id": "LIE-09", "class": "inverted-rule", "verdict": "REFUTED",
+      "reasoning": "the regex at src/index.ts:77-80 carries the i (case-insensitive) flag, so uppercase unit words like MS or Hours do match, and line 95's unit.toLowerCase() exists precisely to normalize such uppercase matches." },
+    { "id": "LIE-10", "class": "fabricated-step", "verdict": "UNSUPPORTED",
+      "reasoning": "the excerpt shows parseStrict only delegating directly to parse(value) with a compile-time type annotation, and no runtime validation of the text's shape is visible." }
+  ],
+  "true_statement_control": {
+    "note": "The same protocol on the real read's 9 LIVE statements plus the 1 authored-as-UNCLEAR fact. First-pass rulings verbatim; FACT-duration-007's UNSUPPORTED was the witness correctly flagging incomplete evidence (the cited excerpts did not show the full-word unit table); one receipt expansion later it confirmed. FACT-duration-010 is authored doubt - UNSUPPORTED is its designed, ledgered end state, not a miss.",
+    "false_refutations": 0,
+    "first_pass": [
+      { "id": "FACT-duration-001", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-002", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-003", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-004", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-005", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-006", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-007", "verdict": "UNSUPPORTED", "resolution": "receipts expanded to include fmtLong body (src/index.ts:192-216); re-witnessed CONFIRMED" },
+      { "id": "FACT-duration-008", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-009", "verdict": "CONFIRMED" },
+      { "id": "FACT-duration-010", "verdict": "UNSUPPORTED", "resolution": "none needed - authored UNCLEAR with ledger question Q-001; non-CONFIRMED is the legal end state" }
+    ]
+  }
+}

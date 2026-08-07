@@ -1979,6 +1979,38 @@ async function debtChecks() {
     assert(v.ok, `NFC receipt path did not reach the blob git tracks as "${tracked}": ` + (v.detail || v.reason));
   });
 
+  check('a const definition is citable even when the graph knows its name only as an argument', () => {
+    // The indexer never records variable declarations, so a const referenced
+    // later as a bare argument is known to the graph ONLY through that
+    // reference site. The refinement must not reject the definition's own
+    // receipt against that provably incomplete list. Found by the
+    // OSS-fixture benchmark, pinned here.
+    // The reference site sits far outside the definition's drift window —
+    // exactly the shape that made the false rejection fire.
+    const content = 'const lim = 5;\n' + Array(15).fill('// filler').join('\n') +
+      '\nfunction f(x) {\n  return check(x, lim);\n}\n';
+    const read = (p) => (p === 'src/x.ts' ? content : null);
+    const index = { graph_version: 1, commit: 'abc1234', files: [
+      { path: 'src/x.ts', language: 'js',
+        symbols: [{ name: 'f', kind: 'function', line: 17 }],
+        calls: [{ name: 'check', line: 18, from: 'f' }, { name: 'lim', line: 18, from: 'f' }] }
+    ], skipped: { unsupported: 0, too_large: 0, parse_failed: 0, unreadable: 0 } };
+    const v = V.verifyReceipt({ file: 'src/x.ts', line: 1, symbol: 'lim' }, read, index);
+    assert(v.ok, 'const definition receipt rejected by call-site-only graph knowledge: ' + (v.detail || v.reason));
+    assert(v.via === 'text', 'call-site-only knowledge must fall back to the text verdict, got: ' + v.via);
+    // And the tightening still fires where it is valid: f is DEFINED in the
+    // graph, so a window that only contains a comment mention must reject.
+    const content2 = 'const lim = 5;\n// f is called here\nconst pad = 1;\nfunction unrelated() {}\n' +
+      Array(10).fill('// filler').join('\n') + '\nfunction f(x) { return x; }\n';
+    const read2 = (p) => (p === 'src/y.ts' ? content2 : null);
+    const index2 = { graph_version: 1, commit: 'abc1234', files: [
+      { path: 'src/y.ts', language: 'js',
+        symbols: [{ name: 'f', kind: 'function', line: 15 }], calls: [] }
+    ], skipped: { unsupported: 0, too_large: 0, parse_failed: 0, unreadable: 0 } };
+    const v2 = V.verifyReceipt({ file: 'src/y.ts', line: 2, symbol: 'f' }, read2, index2);
+    assert(!v2.ok && v2.reason === 'symbol-not-found', 'a comment mention of a DEFINED symbol still verified');
+  });
+
   check('control bytes in argv never reach the terminal raw', () => {
     const BIN2 = path.join(__dirname, '..', 'bin', 'ogma.js');
     // Built from char codes so no raw control byte sits in this source file.
