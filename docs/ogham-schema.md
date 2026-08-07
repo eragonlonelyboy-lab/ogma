@@ -353,7 +353,7 @@ After watch: re-read each stale fact at HEAD per the read protocol (re-author, r
 }
 ```
 
-Validated by `validatePushState`: allowlisted non-null kind, hex commit, ISO instant, safe `out/` paths (unique), 64-hex digests, numeric `page_id` when present. Written only after every delivery in it verified.
+Validated by `validatePushState`: allowlisted non-null kind, hex commit, ISO instant, safe `out/` paths (unique), 64-hex digests, numeric `page_id` when present. Every entry in it describes a **verified** delivery — per-file `sha256` is ground truth for what that destination page actually holds. A mid-fleet failure still records the pages that verified before it (losing a created page's mapping would make the next push create a duplicate), keeps prior entries for documents not reached, and exits 1.
 
 ## Invariants
 

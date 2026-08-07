@@ -1866,6 +1866,38 @@ async function watchChecks() {
     assert(factsOf(b)[0].status === 'stale', 'undiffable fact not marked stale');
     assert(msgs.some(m => m.includes('cannot be diffed')), 'reason not named');
   });
+  await checkAsync('a receipt into a non-ASCII path is still invalidated — quoted diff names must not hide an edit', async () => {
+    // Hand-built minimal Ogham (no ingest needed: watch checks structure, not
+    // witness binding). The cited file has a non-ASCII name — the path rule
+    // allows those on purpose, so watch must see them in diffs too.
+    const dir = makeFixtureRepo({ 'src/héllo.ts': 'export function greet() {\n  return "hi";\n}\n' });
+    cmdInit(dir, quiet);
+    const c1 = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+    fs.mkdirSync(path.join(dir, '.ogma/ogham/facts'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ogma/ogham/manifest.json'), JSON.stringify({
+      ogham_version: 1, project: 'uni', repo_root: '.', cutoff_commit: c1,
+      generated_at: '2026-08-07T00:00:00Z',
+      counts: { surfaces: 0, modules: 1, features: 1, facts: 1, ledger_open: 0 }
+    }, null, 2));
+    const factsPath = path.join(dir, '.ogma/ogham/facts/greetings.json');
+    fs.writeFileSync(factsPath, JSON.stringify({
+      module: 'greetings',
+      features: [{ id: 'FEAT-greetings-greet', name: 'Greet', classification: 'LIVE',
+        does: 'x', happens: 'y', sees: 'z', fact_ids: ['FACT-greetings-001'] }],
+      facts: [{ id: 'FACT-greetings-001', feature_id: 'FEAT-greetings-greet', kind: 'state',
+        statement: 'The greeting is fixed.', classification: 'LIVE',
+        receipts: [{ file: 'src/héllo.ts', line: 2, symbol: 'greet' }],
+        witness: { verdict: 'CONFIRMED', checked_at_commit: c1, checker: 'bench', input_hash: 'a'.repeat(64) },
+        verified_at_commit: c1, status: 'fresh', ledger_refs: [] }]
+    }, null, 2));
+    fs.writeFileSync(path.join(dir, 'src/héllo.ts'), 'export function greet() {\n  return "hello there";\n}\n');
+    gitIn(dir, ['add', '-A']);
+    gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'edit unicode file']);
+    const msgs = [];
+    assert(require('../lib/watch').cmdWatch(dir, m => msgs.push(m)) === 0, 'watch failed: ' + msgs.join(' | '));
+    const fact = JSON.parse(fs.readFileSync(factsPath, 'utf8')).facts[0];
+    assert(fact.status === 'stale', 'an edit to a non-ASCII-named cited file was not seen — quoted path hid it');
+  });
   await checkAsync('already-stale facts are not re-marked, and the report says they still await re-read', async () => {
     const b = await ingested();
     const doc = JSON.parse(fs.readFileSync(b.factsPath, 'utf8'));
@@ -2105,6 +2137,58 @@ async function pushChecks() {
         'a write that read back wrong was reported as delivered');
       assert(msgs.join(' ').includes('did not verify') || msgs.join(' ').includes('verify'), 'failure not named as a verification failure');
       assert(!fs.existsSync(statePath(b)), 'push-state recorded an unverified delivery');
+    } finally {
+      server.close();
+    }
+  });
+  await checkAsync('a mid-fleet failure records the pages already verified — a retry cannot create duplicates', async () => {
+    const http = require('http');
+    // Honest for the first created page, then refuses every later create.
+    const pages = new Map(); let nextId = 700; let creates = 0; let failAfter = 1;
+    const server = http.createServer((req, res) => {
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const u = new URL(req.url, 'http://x');
+        if (req.method === 'GET' && u.pathname === '/wiki/api/v2/spaces') return send(200, { results: [{ id: '9' }] });
+        if (req.method === 'POST') {
+          if (++creates > failAfter) return send(500, {});
+          const p = JSON.parse(body); const id = String(nextId++);
+          pages.set(id, { id, title: p.title, status: 'current', version: { number: 1 }, body: p.body.value });
+          return send(200, { id, title: p.title });
+        }
+        const pm = /^\/wiki\/api\/v2\/pages\/(\d+)$/.exec(u.pathname);
+        const page = pm && pages.get(pm[1]);
+        if (!page) return send(404, {});
+        const out = { id: page.id, title: page.title, status: page.status, version: page.version };
+        if (u.searchParams.get('body-format') === 'storage') out.body = { storage: { value: page.body } };
+        return send(200, out);
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const env = {
+      CONFLUENCE_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+      CONFLUENCE_EMAIL: 'bench@ogma.test', CONFLUENCE_API_TOKEN: 'token'
+    };
+    try {
+      const b = await certified();
+      const msgs = [];
+      assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), env) === 1,
+        'a mid-fleet failure exited 0');
+      const st = stateOf(b);
+      assert(st.files.length === 1 && /^\d+$/.test(st.files[0].page_id), 'the verified page mapping was not recorded: ' + JSON.stringify(st.files));
+      const firstId = st.files[0].page_id;
+      assert(msgs.join(' ').includes('page mapping is recorded'), 'partial-state line missing');
+      // retry with the server healthy again: the recorded page must be REUSED
+      failAfter = Infinity;
+      const msgs2 = [];
+      assert(await P.cmdPush(b.dir, [], m => msgs2.push(m), env) === 0, 'retry failed: ' + msgs2.join(' | '));
+      const st2 = stateOf(b);
+      assert(st2.files.find(f => f.page_id === firstId), 'retry abandoned the recorded page');
+      assert([...pages.values()].filter(p => p.id === firstId).length === 1
+        && ![...pages.values()].some(p => p.id !== firstId && p.title === pages.get(firstId).title),
+        'retry created a duplicate of the already-delivered page');
     } finally {
       server.close();
     }
