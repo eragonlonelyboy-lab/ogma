@@ -1,0 +1,92 @@
+{
+  "artifact": "OGMA — finished product, ship gate (Batches 0-8 complete)",
+  "round": 1,
+  "reviewed_at": "2026-08-07",
+  "commit": "097edf7",
+  "panel": "5 blind critics, real subagents, each given only the artifact path + its rubric. All five ran the code: npm test, hostile fixtures, live CLI probes, a mock Confluence server.",
+  "gating_rule": "CHI-R140 — this is the single ship panel, not a per-batch gate. Bar 8, no averaging, reject on doubt.",
+  "verdict": "FAIL",
+  "confidence": 0.8,
+  "minMargin": -5,
+  "perLens": [
+    { "lens": "security", "score": 3, "bar": 8, "blocking": 3, "margin": -5, "pass": false },
+    { "lens": "correctness", "score": 4, "bar": 8, "blocking": 2, "margin": -4, "pass": false },
+    { "lens": "edge-cases", "score": 7, "bar": 8, "blocking": 1, "margin": -1, "pass": false },
+    { "lens": "spec", "score": 7, "bar": 8, "blocking": 2, "margin": -1, "pass": false },
+    { "lens": "code", "score": 7, "bar": 8, "blocking": 2, "margin": -1, "pass": false }
+  ],
+  "convergent_findings": [
+    {
+      "id": "SHIP-01",
+      "title": "The gate certifies stale facts as fresh — the product's central promise fails on the most ordinary workflow",
+      "reproduced_by": ["correctness", "edge-cases"],
+      "severity": "blocking",
+      "detail": "ingest stamps manifest.cutoff_commit = HEAD unconditionally (ingest.js:222) while receipts and witness hashes are verified at each fact's OWN verified_at_commit. So after a commit changes cited code, the sequence graph -> ingest -> render -> gate (never running watch) passes 9/9 with a PRD that contradicts HEAD, and the hole is then permanent: watch sees cutoff == HEAD and reports 'nothing moved'. rendersTo's freshness rule is never enforced against the repo. Independently, edge-cases reproduced the same class from the other side: render -> commit -> watch (fact goes stale) -> gate still PASSES, because gate's integrity resolves annotations by ID existence only and nothing binds rendered prose to fact content or status.",
+      "verified_by_maker": "Yes — confirmed by reading the code path; ingest.js:222 advances the pointer with no diff against receipt ranges, and gate.js has zero graph-currency or render-freshness checks."
+    },
+    {
+      "id": "SHIP-02",
+      "title": "Leaklint and readability are bypassable through unvalidated multi-line text fields",
+      "reproduced_by": ["code"],
+      "severity": "blocking",
+      "detail": "isNonEmptyString accepts newlines and backticks in statement / does / happens / sees / module name / summary. Renderers interpolate them raw into line-oriented markdown; the gate's narrativeText drops heading lines and fenced spans before both the leak lint and the FK grade. A statement containing a newline plus '# ... http api endpoint database' renders banned vocabulary to business readers while the certificate says zero technical vocabulary reached them. Only config.project carries a control-character check.",
+      "verified_by_maker": "Yes — executed: leakHits('Pay your bill online.\\n# this uses the http api endpoint and a database\\nAll good.', []) returns []. validateFact accepts newline-bearing and backtick-bearing statements with zero errors."
+    },
+    {
+      "id": "SHIP-03",
+      "title": "A repo-supplied delivery TARGET is adopted as consent",
+      "reproduced_by": ["security"],
+      "severity": "blocking",
+      "detail": "init refuses a repo-shipped destination.kind/asked but never inspects destination.confluence. push merges the prior targeting block when --space/--parent are omitted (push.js:363-368). A hostile repo ships kind:null, asked:false with a pre-seeded space_key/parent_page_id; the victim's own documented consent command then delivers the whole documentation fleet to the attacker's page, authenticated with the operator's token, and the CLI never prints where it went. The consent gate I built refuses the wrong half of the config.",
+      "verified_by_maker": "Yes — the merge is in code I wrote; the critic ran it end to end against a mock server and captured the attacker space/parent in the request."
+    },
+    {
+      "id": "SHIP-04",
+      "title": "Symlink write-redirection is defended at init/terrain only; eight other write sites follow repo-planted links",
+      "reproduced_by": ["security", "code"],
+      "severity": "blocking",
+      "detail": "refuseSymlink exists in init.js and terrain.js and nowhere else. render.js, map.js, gate.js, graph.js, watch.js (x2), ingest.js, push.js (x2) write without lstat. A cloned repo tracking .ogma/out as a link redirects writes outside the repo for anyone who runs prd/explain/questions/map/gate without re-running init. Demonstrated with a Windows junction: six files written into a directory outside the repo, while init on the same tree correctly refused. Exactly the class CHI-R137 names: the defect was fixed in one place and the sweep never ran.",
+      "verified_by_maker": "Not re-run by me; the critic's demonstration is specific and the absent lstat calls are trivially confirmable."
+    },
+    {
+      "id": "SHIP-05",
+      "title": "Graph-tightened verification still rejects genuine code for a whole class of references",
+      "reproduced_by": ["correctness"],
+      "severity": "blocking",
+      "detail": "The Batch 8 fix required a DEFINITION entry before the tightening fires, which closed the const-declaration case. But the indexer records bare identifiers only in call-argument position, so a DEFINED function referenced by 'module.exports = { pay }', 'export { pay }', 'return pay', or 'const x = pay' has no graph occurrence at that line — and a receipt citing it is rejected as 'a mention, not the code'. ingest exits 1 on a legitimate completed read. The fix I shipped repaired one instance of the class and left the others standing.",
+      "verified_by_maker": "Not re-run by me; the mechanism is exactly the one I reasoned about in the Batch 8 fix and the critic traced it to graph.js:159-167."
+    },
+    {
+      "id": "SHIP-06",
+      "title": "The certificate section of the schema doc describes a certificate the code does not write",
+      "reproduced_by": ["spec"],
+      "severity": "blocking",
+      "detail": "docs/ogham-schema.md specifies ogham_version / cutoff_commit / checked_at / head_commit / audiences_enabled / verdict / checks[].id. The code writes certificate_version / commit / generated_at / pass / counts / checks[].check. The doc's substantive claim that the enabled-audience set is recorded in the certificate is false — no such field exists. The same section claims renderers stamp verdict + counts into headers; they stamp the commit only, and render runs before gate so a verdict cannot exist at render time. The repo's own law (a schema change without a same-commit doc edit is a defect) convicts this.",
+      "verified_by_maker": "Yes — the shipped benchmarks/oss-fixture/certificate.json carries none of the documented field names."
+    },
+    {
+      "id": "SHIP-07",
+      "title": "Systematic helper duplication, including a load-bearing triplicate",
+      "reproduced_by": ["code"],
+      "severity": "blocking",
+      "detail": "readJson x4, refuseSymlink x2, witness.js reimplements verify.js's exported toLines, escapeXml == map.js esc, readerAt x2, the ISO-timestamp expression x4, and — the dangerous one — the 'all receipts of a fact' expression written out three times in watch.js, gate.js and ingest.js. If one copy ever gains a new receipt-bearing field, the invalidator, the certifier and the ingester silently disagree about which citations exist. schema.js's own comment says the fix for a defect class is one shared implementation, not a per-file patch.",
+      "verified_by_maker": "Yes — grep-confirmable, and the triplicate is code I wrote in three separate batches without consolidating."
+    }
+  ],
+  "notable_minor": [
+    "gate coverage uses prd.includes('## ' + name) — a substring match any deeper heading satisfies; demoting a module heading to #### still certifies (reproduced by correctness and code).",
+    "push --to markdown-only after a confluence push wipes page_id mappings, so the next confluence push creates duplicates.",
+    "The certificate does not bind out/ document bytes, so a document edited between gate and push ships under the certified banner.",
+    "map.js JSON.parses certificate.json with no validation and conflates corrupt with absent.",
+    "gate verifies receipts without the graph refinement and never checks graph currency — it passes states ingest refuses.",
+    "feature ids skip the ID grammar (validateFeature checks only non-empty string); '-->' in a feature id would break annotation parsing.",
+    "--end-of-options is documented as required for git readers and appears nowhere in the code.",
+    "skill/SKILL.md still says the benchmark and catch rate remain to be done; they shipped in this commit.",
+    "Confluence CREATE whose fetch-back fails after a successful write leaves an unrecorded remote page (retry duplicates).",
+    "graph.js innermost() is O(S*(S+C)) per file; ~1e8 comparisons at the caps.",
+    "Zero-commit and zero-citable-file repos emit internal-looking errors instead of honest 'no commits yet' / 'nothing citable here' messages."
+  ],
+  "what_held": "No command injection (every git call is spawnSync with an array, commit-ish hex-gated, paths deny-listed). No secrets in source. No prototype pollution. map.html XSS-safe (textContent everywhere, escaped DATA). Confluence body escaping holds against a CDATA/macro payload. Credentials env-only and dropped on cross-origin redirect. Validators fail closed on every hostile shape. Witness hash v2 canonicalization praised by two lenses as real protocol thinking. No resource leaks, no trace-less swallowed errors. Watch hunk math held under boundary tracing. Unicode/NFD handling, CRLF twins, 16MB and 2MB caps, error-amplification cap, concurrent watch/gate — all probed and held. 227/227 bench green, verified independently by all five critics.",
+  "honest_read": "The hardening is genuinely strong and the panel said so repeatedly. What failed is not polish: three of the seven blocking findings are the product's own central promise (a certificate that says PASS over content that contradicts HEAD), and two more are the CHI-R137 class — a defect fixed in one place while its twins stood ten lines or one file away (symlink refusal, graph reference kinds). The build passed every gate I could author for myself, and the blind panel found what my own instruments were shaped not to see.",
+  "decision": "DO NOT SHIP. Nothing published. Batch 8 stays in-progress; the findings become a fix batch, then this panel re-runs on the finished tree."
+}
