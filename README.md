@@ -19,7 +19,7 @@ then renders that one model for every audience:
 |---|---|
 | **Receipts** | Every fact carries a file:line citation, verified by deterministic code — not by a model |
 | **Witness** | Every fact's statement is truth-checked by a blind judge against the cited code itself. Measured on seeded false statements with valid receipts against a public OSS fixture: **10/10 lies caught, 0/9 true statements falsely refuted** ([full record + methodology](benchmarks/oss-fixture/benchmark.md)). The witness is model judgment and can be wrong — which is why this number is measured per release, never assumed |
-| **Certificate** | Nothing ships until nine deterministic checks pass; the result is a machine-checkable `certificate.json` |
+| **Certificate** | Nothing ships until ten deterministic checks pass; the result is a machine-checkable `certificate.json` that also binds the certified document bytes |
 | **Evidence classification** | LIVE / DEAD / HALF-BUILT / UNCLEAR before anything is written up. Dead code never becomes a "feature" in your PRD |
 | **One graph** | The PRD, the impl notes, and the user guide cannot cite different code — every claim in every audience traces to the same fact and the same citation |
 | **Honesty ledger** | What the code can't answer becomes a tracked question, never a hallucinated paragraph |

@@ -171,7 +171,7 @@ Field rules (all enforced by `lib/schema.js` unless marked gate):
   Everything else a real repository contains is citable, deliberately: `app/[id]/page.tsx`, `src/routes/+page.svelte`, `app/(marketing)/layout.tsx`, `packages/@scope/pkg/src/index.ts`, names carrying spaces or non-ASCII letters. An allow-list of "portable" characters was tried and was worse — it made whole ecosystems uncitable, so those files were silently left undocumented while the certificate still read PASS. Win32 reserved device names (`CON`, `NUL`, `COM1`) are **not** rejected: OGMA reads only through `git show <commit>:<path>` and never opens the working-tree file, so they are ordinary names here.
 - `line` — 1-indexed, `end_line` optional (≥ line); the receipt's **range** is `[line, end_line ?? line]`
 - `symbol` — identifier-shaped, ≤200 chars (validator-enforced shape)
-- **Verification (zero-LLM):** read `git show <verified_at_commit>:<file>` — never the working tree, so a dirty tree cannot fake or break a receipt. Every commit-ish field (`verified_at_commit`, `witness.checked_at_commit`, `manifest.cutoff_commit`) is validated as hex `[0-9a-f]{7,64}` **because it reaches git's argv**: an unvalidated value like `--output=<path>` would sit in an option position and let git create or truncate a file. Readers must additionally pass `--end-of-options` and never place data-derived strings in option positions. The symbol must appear as a **literal word-boundary match** (never a constructed RegExp from data) within the range widened by ±`RECEIPT_DRIFT_WINDOW` (5 — an untested default, tuned when Batch 2 lands).
+- **Verification (zero-LLM):** read `git show <verified_at_commit>:<file>` — never the working tree, so a dirty tree cannot fake or break a receipt. Every commit-ish field (`verified_at_commit`, `witness.checked_at_commit`, `manifest.cutoff_commit`) is validated as hex `[0-9a-f]{7,64}` **because it reaches git's argv**: an unvalidated value like `--output=<path>` would sit in an option position and let git create or truncate a file. Data-derived paths never occupy an option position either: receipt paths are schema-refused when they start with `-`, ride embedded in the same argument as the commit (`<commit>:<path>`) for `show`/`cat-file`, and sit after an explicit `--` separator in every diff invocation. The symbol must appear as a **literal word-boundary match** (never a constructed RegExp from data) within the range widened by ±`RECEIPT_DRIFT_WINDOW` (5 — an untested default, tuned when Batch 2 lands).
 - **Invalidation (watch):** a commit touching `file` within the widened range marks the fact `stale`.
 - Known false-positive risk, stated: a short symbol can word-boundary-match an unrelated occurrence in the window. The witness pass is the backstop; the bench measures it.
 
@@ -237,7 +237,7 @@ The gate's `ledger` check is `raised ⊆ ledger`. Honest scope: both files are w
 
 ## The out/ contract
 
-Four of the nine gate checks (`coverage`, `leaklint`, `readability`, and the render half of `integrity`) read rendered documents. Which documents, named how, is therefore part of the schema and not a renderer's private business — an unspecified filename is a check that silently reads nothing and passes.
+Five of the ten gate checks (`coverage`, `leaklint`, `readability`, the render half of `integrity`, and the rebuild half of `freshness`) read rendered documents. Which documents, named how, is therefore part of the schema and not a renderer's private business — an unspecified filename is a check that silently reads nothing and passes.
 
 `outDocuments(config, terrain)` in `lib/schema.js` returns the exact set a run must produce, as paths relative to `.ogma/out/`, sorted:
 
@@ -269,30 +269,33 @@ Check 8 scores narrative prose with **Flesch-Kincaid grade level, computed per r
 
 ```json
 {
-  "ogham_version": 1,
+  "certificate_version": 1,
   "project": "acme-wallet",
-  "cutoff_commit": "a1b2c3d",
-  "checked_at": "2026-08-05T12:30:00Z",
-  "head_commit": "a1b2c3d",
-  "audiences_enabled": ["prd", "tech", "guides"],
+  "commit": "a1b2c3d…",
+  "generated_at": "2026-08-05T12:30:00Z",
+  "pass": true,
   "checks": [
-    { "id": "coverage",   "pass": true, "detail": "14/14 modules rendered in every enabled audience" },
-    { "id": "receipts",   "pass": true, "detail": "241/241 receipt objects verified (fact + path-hop + ledger receipts), 0 broken" },
-    { "id": "witness",    "pass": true, "detail": "198/198 LIVE facts CONFIRMED at their verified commit; 14 non-LIVE carry rulings + ledger refs; input hashes match" },
-    { "id": "leaklint",   "pass": true, "detail": "0 banned terms in business/guide outputs" },
-    { "id": "complete",   "pass": true, "detail": "60/60 features with LIVE facts carry does/happens/sees; 3/3 without carry why_not_narrated" },
-    { "id": "ledger",     "pass": true, "detail": "raised ⊆ ledger: 7/7" },
-    { "id": "orphans",    "pass": true, "detail": "0 orphan features; 0 empty modules lacking empty_reason" },
-    { "id": "readability","pass": true, "detail": "worst document grade 9.1 (max 10), Flesch-Kincaid per document" },
-    { "id": "integrity",  "pass": true, "detail": "Ogham bound to HEAD a1b2c3d; IDs unique across modules; all ledger_refs resolve; out/ matches the document contract" }
+    { "check": "coverage",   "pass": true, "detail": "all 14 expected documents present" },
+    { "check": "receipts",   "pass": true, "detail": "all receipts verified" },
+    { "check": "witness",    "pass": true, "detail": "every ruling present and bound" },
+    { "check": "leaklint",   "pass": true, "detail": "no technical vocabulary reached non-technical readers" },
+    { "check": "complete",   "pass": true, "detail": "narration policy holds" },
+    { "check": "ledger",     "pass": true, "detail": "every flag filed with an id" },
+    { "check": "orphans",    "pass": true, "detail": "module files internally whole" },
+    { "check": "readability","pass": true, "detail": "prd.md: grade 8.6; guides/app.md: grade 6.2" },
+    { "check": "integrity",  "pass": true, "detail": "bound to a1b2c3d, ids unique, annotations resolve" },
+    { "check": "freshness",  "pass": true, "detail": "every fact current at a1b2c3d, every document matches the Ogham" }
   ],
-  "verdict": "PASS"
+  "counts": { "surfaces": 2, "modules": 14, "features": 60, "facts": 212, "ledger_open": 7 },
+  "documents": [ { "path": "prd.md", "sha256": "<hex64>" } ]
 }
 ```
 
-`verdict` is `PASS` only when all nine pass. Check scope is the enabled audience set, recorded in the certificate so a PASS is interpretable. An **orphan feature** is a feature owning zero facts. Renderers stamp a badge (verdict + counts + commit) into document headers.
+Field truth (this block and `lib/gate.js` change together — the fields above are exactly what the code writes, no more): `certificate_version` (`CERTIFICATE_VERSION`), `project`, `commit` (the repo HEAD the gate ran at), `generated_at` (ISO instant), the boolean topline `pass`, the ten `checks` rows keyed by `check` with a boolean `pass` and a non-empty `detail`, `counts` (copied from the manifest), and `documents` — the certified bytes: one `{path, sha256}` per renderer-owned `out/` document, which `push` re-hashes so a document edited between gate and push refuses to ship. `map.md`/`map.html`/`map.canvas` are views over the certificate itself (legitimately regenerated after a gate run to show the fresh verdict) and are never listed in `documents`.
 
-**`head_commit` and the binding rule.** The gate reads the repo's current HEAD and records it. `integrity` fails unless `oghamIsBound(manifest.cutoff_commit, head_commit)` holds. Without this, nothing anywhere compares the Ogham to the repository it claims to describe: every fact stays internally consistent, every receipt still verifies against the commit it was written at, and a months-old Ogham certifies `PASS` over code that has moved on. When it fails, the fix is `ogma watch`, which refreshes the stale facts and re-certifies.
+`pass` is true only when all ten checks pass. The enabled-audience scope is **not** a certificate field: it is derivable from the `documents` list and the coverage detail. Renderers stamp the cutoff commit into document headers — not a verdict; render runs before the gate, so a verdict cannot exist at render time. An **orphan feature** is a feature owning zero facts.
+
+**`commit` and the binding rule.** The gate reads the repo's current HEAD and records it as `commit`. `integrity` fails unless `oghamIsBound(manifest.cutoff_commit, HEAD)` holds. Without this, nothing anywhere compares the Ogham to the repository it claims to describe. When it fails, the fix is `ogma watch`, then the refresh loop.
 
 ## config.json
 
@@ -331,16 +334,17 @@ Credentials are **never** config: the adapter reads `CONFLUENCE_BASE_URL` (an `h
 4. Watch writes exactly one field per invalidated fact — `status` — and never renumbers or touches anything else. Then it advances `manifest.cutoff_commit` to HEAD (refreshing `manifest.generated_at` in the same write): the pointer question and the per-fact currency question are answered by different fields, so the pointer advances even when facts went stale.
 5. Ledger-question receipts are not watched; the gate re-verifies them at HEAD on every run.
 
-After watch: re-read each stale fact at HEAD per the read protocol (re-author, re-witness, set `verified_at_commit` + `status: "fresh"`), then `ogma ingest`, re-render, `ogma gate`. Renders produced before a watch may still carry since-staled facts; re-rendering before the gate is part of the loop, not optional polish.
+After watch: re-read each stale fact at HEAD per the read protocol (re-author, re-witness, set `verified_at_commit` + `status: "fresh"`), then `ogma ingest`, re-render, `ogma gate`. This loop is enforced, not etiquette: **ingest refuses** while any fact is stale-marked or any fresh fact's cited ranges were touched since its verified commit (same `makeCurrencyChecker` signal — so skipping watch cannot advance the cutoff over moved code, and watch is never disarmed by a wrongly-advanced pointer), and the gate's `freshness` check fails on stale facts, touched citations, an off-HEAD graph, or an out/ document that does not byte-match a rebuild from the Ogham.
 
 ## push-state.json — the delivery record
 
 `ogma push` (`lib/push.js`) delivers the local fleet to the destination the ask-once flow recorded. The rules:
 
-- **Consent is recorded by the tool, never adopted.** `init` refuses a repo-supplied destination; with no recorded choice, push sniffs the environment, prints how to choose, and delivers nothing (exit 1). `--to <kind>` records the choice (validated against the kind allowlist; kinds without a built adapter refuse honestly).
-- **Only a certified fleet ships.** Push refuses without `certificate.json`, on a failing certificate, or when the certificate's commit is not HEAD — the fix (`ogma gate`, or `ogma watch` then the refresh loop) is named in the refusal.
-- **An outward write is unproven until read back.** The Confluence adapter (REST v2, env-credentialed) verifies every update by re-fetching the page (version advanced, status `current`, title intact) and every **create** by re-fetching the full body and requiring every heading present — an API 200 alone is never proof of content.
-- **Replayable:** the `path → page_id` mapping persists, so a re-push updates the same pages; documents whose sha256 is unchanged since the last verified delivery are skipped, not re-written.
+- **Consent is recorded by the tool, never adopted.** `init` refuses a repo-supplied destination — the consent half (`kind`/`asked`) AND the targeting half (a pre-seeded `destination.confluence` space/parent block). Push additionally refuses outright when `.ogma/config.json` or `.ogma/push-state.json` is **tracked in the repository**: a file the repo ships is a file the repo's author wrote, not a choice this operator made, and push can run in a clone where init never did. With no recorded choice, push sniffs the environment, prints how to choose, and delivers nothing (exit 1). `--to <kind>` records the choice (validated against the kind allowlist; kinds without a built adapter refuse honestly).
+- **Only a certified fleet ships — the certified bytes, specifically.** Push refuses without `certificate.json`, on a failing certificate, or when the certificate's commit is not HEAD, and re-hashes every renderer-owned document against `certificate.documents` — a document edited after the gate ran refuses with the fix named (`map.*` files are certificate views and exempt).
+- **The destination is printed before anything moves.** A push that never says where it is delivering is a push whose redirection nobody notices.
+- **An outward write is unproven until read back.** The Confluence adapter (REST v2, env-credentialed) verifies every update by re-fetching the page (version advanced, status `current`, title intact) and every **create** by re-fetching the full body and requiring every heading present — an API 200 alone is never proof of content. A create that succeeded but failed its read-back left a REAL page on the remote: it is recorded with `verified: false` (never as verified), so replay never skips it and the next push updates it in place instead of creating a duplicate.
+- **Replayable:** the `path → page_id` mapping persists, so a re-push updates the same pages; documents whose sha256 is unchanged since the last verified delivery are skipped, not re-written. A `markdown-only` push carries prior page-id mappings through untouched — switching destination kinds must not amnesia the pages already created.
 - Fact-ID annotations are stripped from delivered bodies (`stripAnnotations` — the same single implementation the gate uses); the sha256 recorded is of the canonical local markdown, which remains the source of truth.
 
 ```json
@@ -353,7 +357,7 @@ After watch: re-read each stale fact at HEAD per the read protocol (re-author, r
 }
 ```
 
-Validated by `validatePushState`: allowlisted non-null kind, hex commit, ISO instant, safe `out/` paths (unique), 64-hex digests, numeric `page_id` when present. Every entry in it describes a **verified** delivery — per-file `sha256` is ground truth for what that destination page actually holds. A mid-fleet failure still records the pages that verified before it (losing a created page's mapping would make the next push create a duplicate), keeps prior entries for documents not reached, and exits 1.
+Validated by `validatePushState`: allowlisted non-null kind, hex commit, ISO instant, safe `out/` paths (unique), 64-hex digests, numeric `page_id` when present, and an optional `verified` field that may only be `false` (absence means verified). An entry without `verified: false` describes a **verified** delivery — per-file `sha256` is ground truth for what that destination page actually holds; a `verified: false` entry records a page that exists on the remote but whose content failed read-back, kept so the next push updates instead of duplicating. A mid-fleet failure still records the pages that verified before it, keeps prior entries for documents not reached, and exits 1.
 
 ## Invariants
 
@@ -378,7 +382,7 @@ Process rules (not machine-checkable in one snapshot, stated as discipline): wat
 
 ## The gate and the certificate
 
-`ogma gate` (`lib/gate.js`) runs nine checks and writes `.ogma/certificate.json` on PASS **and** on FAIL — an honest failing certificate is the product working. Pass conditions, pinned (this prose and the code change together):
+`ogma gate` (`lib/gate.js`) runs ten checks and writes `.ogma/certificate.json` on PASS **and** on FAIL — an honest failing certificate is the product working. Pass conditions, pinned (this prose and the code change together):
 
 1. **coverage** — every document `outDocuments(config, terrain)` expects exists under `out/`, and (when `prd` is enabled) `prd.md` carries a `## <name>` section for every terrain module. Guide exemptions for non-interactive surfaces are recorded in the detail, never counted as gaps.
 2. **receipts** — every receipt on every fact (including path hops) verifies at that fact's own commit; ledger-question receipts verify at HEAD.
@@ -389,12 +393,17 @@ Process rules (not machine-checkable in one snapshot, stated as discipline): wat
 7. **orphans** — every module file passes `validateModuleFile` whole (bidirectional feature↔fact links, worst-of-facts rollups, empty_reason).
 8. **readability** — Flesch-Kincaid grade per document (`prd.md`, each `guides/*.md`), on the same narrative text leaklint measures, each ≤ `config.readability_max_grade`. Syllables: vowel-group runs minus a silent trailing `e`, minimum 1. One population, one grade per document — not per line, not per section.
 9. **integrity** — the Ogham is bound to HEAD (`cutoff_commit`), ids are globally unique, and every `<!-- fact:… -->` / `<!-- feature:… -->` annotation in every rendered document resolves to a record in the Ogham — an annotation nothing owns is a fabricated claim wearing a receipt.
+10. **freshness** — the certifying boundary's own currency proof, independent of the manifest pointer: (a) `graph/index.json` exists, validates, and describes HEAD (else the receipt check would run weaker than ingest's); (b) no fact is marked `stale` — a stale fact is a re-read that has not happened, and its feature is silently absent from business output; (c) every fresh fact's cited ranges are untouched between its `verified_at_commit` and HEAD, proven by the same diff-overlap rule watch uses (`makeCurrencyChecker` — one implementation; cannot-diff fails); (d) every renderer-owned `out/` document byte-matches a fresh rebuild from the Ogham through the same builders the render commands use — this is what binds rendered prose to fact content and status, so a document rendered before a fact changed, went stale, or was demoted can never certify.
 
-The certificate schema (`validateCertificate`) refuses dishonest shapes structurally: a topline `pass` that contradicts its rows, or a certificate quietly one check short, does not validate and is never written.
+Since the freshness check also runs at ingest (ingest refuses to advance `cutoff_commit` over a fact whose citations moved, and refuses stale-marked facts outright), the certified pipeline cannot reach the state where `graph → ingest → render → gate` after a commit certifies a PRD that contradicts HEAD — and watch is never disarmed by a wrongly-advanced pointer.
+
+The certificate schema (`validateCertificate`) refuses dishonest shapes structurally: a topline `pass` that contradicts its rows, a certificate quietly one check short, or malformed `documents` entries do not validate and are never written.
 
 ## Cross-cutting rules
 
 **Unicode normalization** (`lib/verify.js` is the implementation; this prose and that file change together): macOS writes filenames in NFD while nearly everything else authors NFC, so the same visible name can be two byte sequences. The rule: comparisons between Ogham strings and repo-derived strings (symbol-in-window matches, graph path/symbol equality, watch's changed-file matching) are **NFC-normalized on both sides**, and a git path lookup whose stored bytes miss **retries the NFD and NFC forms** before ruling the file missing. The bytes handed to git for a per-file diff are always the repo's actual name, never a normalized form. `witnessInputHash` deliberately does NOT normalize its inputs — the hash binds the exact bytes the reader returned, and the reader is deterministic.
+
+**Renderable prose is single-line** (`isRenderableProse`): every field the renderers interpolate raw into line-oriented markdown — fact `statement`, feature `name`/`does`/`happens`/`sees`/`why_not_narrated`, path `entry`/`exit`/hop names, terrain module `name`/`summary`, ledger `question`, `empty_reason` — refuses control characters (including newlines), C1, bidi controls, and backticks at the schema boundary. The gate's leak lint and readability checks drop heading lines and code spans/fences before scanning; a newline would let a field author its own heading or fence and a backtick would open a code span, either way carrying banned vocabulary into business output under a clean certificate. The bypass class is closed at intake, not chased per check.
 
 **Timestamps**: every `generated_at` / `delivered_at` is checked by `isIsoInstant` — ISO-8601 UTC shape AND a real calendar date (month lengths, leap years, hour/minute/second ranges). The shape regex alone accepted `9999-99-99`; `Date.parse` cannot replace the range checks because V8 rolls a day overflow inside a valid month (`2026-02-30` parses as March 2).
 
@@ -404,7 +413,7 @@ The certificate schema (`validateCertificate`) refuses dishonest shapes structur
 
 - Receipts verify **citation integrity, not statement truth**; the witness pass covers truth and is itself fallible — its measured catch rate ships with every release.
 - The ±5 drift window and the ~35-term leaklint base are untested defaults; both are tuned against real data in later batches.
-- Symbol matching is structural (word-boundary text match), not semantic; tree-sitter indexing in Batch 2 narrows but does not eliminate false positives. The implemented rule (`lib/verify.js`): a receipt verifies when its file is retrievable at the pinned commit, its cited line exists, and its symbol occurs as a whole word (Unicode letters/digits/`_`/`$` are the boundary class) within the ±5 drift window; failures come back as a closed reason set (`invalid-receipt` | `missing-file` | `file-too-large` | `bad-line` | `symbol-not-found`) so the gate can aggregate them. The symbol is never compiled into a RegExp. CRLF and LF blobs verify identically. Files over 16 MB fail with their own reason rather than being read. With a graph index supplied, verification upgrades to **symbol-table-backed**: when the graph holds a **definition** entry for the symbol in that file, a real occurrence (definition or call site) must sit inside the window — a comment mention no longer verifies. The refinement fires only on defined-in-file names because that is the only case where the graph's occurrence list is complete: the indexer never records variable declarations, so a name known only through call or reference sites has a definition the graph cannot see, and rejecting that definition's own receipt would be the graph's ignorance rejecting a receipt (first hit by the OSS-fixture benchmark: `const mo = y / 12` was uncitable because `mo` appeared later as a bare argument). Names the graph cannot fully know still verify by text.
+- Symbol matching is structural (word-boundary text match), not semantic; tree-sitter indexing in Batch 2 narrows but does not eliminate false positives. The implemented rule (`lib/verify.js`): a receipt verifies when its file is retrievable at the pinned commit, its cited line exists, and its symbol occurs as a whole word (Unicode letters/digits/`_`/`$` are the boundary class) within the ±5 drift window; failures come back as a closed reason set (`invalid-receipt` | `missing-file` | `file-too-large` | `bad-line` | `symbol-not-found`) so the gate can aggregate them. The symbol is never compiled into a RegExp. CRLF and LF blobs verify identically. Files over 16 MB fail with their own reason rather than being read. With a graph index supplied, verification upgrades to **symbol-table-backed**: when the graph holds a **definition** entry for the symbol in that file, a real occurrence (definition or call site) must sit inside the window — a comment mention no longer verifies. The refinement fires only on defined-in-file names, and for those names the occurrence list is complete **by construction**: the indexer records every identifier token in the file that matches a name defined in that file (so `module.exports = { pay }`, `export { pay }`, `return pay` and `const x = pay` are all occurrences — value-position references were once invisible, and receipts citing genuine code were rejected as mentions). A name known only through call or reference sites (defined elsewhere, e.g. imported) never triggers the refinement — rejecting on an incomplete list would be the graph's ignorance rejecting a receipt (first hit by the OSS-fixture benchmark: `const mo = y / 12` was uncitable because `mo` appeared later as a bare argument). Names the graph cannot fully know still verify by text.
 - "Local-first" means: OGMA's CLI is local and never calls a model, and the Ogham never leaves the machine. The *reading* is done by whatever host agent the user runs — if that agent is a hosted model, code goes wherever that agent sends it. OGMA adds no network calls of its own.
 - Cross-audience consistency means every audience **cites the same facts and the same code** — renderers cannot introduce a claim without a fact ID. It does not mean the three prose retellings are semantically compared to each other.
 - Commit identity is **prefix equality on abbreviated hex**, so two genuinely different commits sharing a 7-character prefix would compare equal. Git itself has this exposure and lengthens abbreviations as a repo grows; OGMA does not currently lengthen. Writers should store full 40-character ids where they can.

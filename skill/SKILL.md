@@ -1,6 +1,6 @@
 ---
 name: ogma
-description: "OGMA — One Graph, Many Audiences. Read a codebase once into a receipt-backed model (the Ogham), then render it per audience: implementation notes for engineers, a feature-first PRD for business readers, click-by-click guides for end users. Every fact carries a verified code citation; every output ships with a deterministic certificate. STATUS: every power is live (init, terrain, graph, ingest, renderers, gate, map, watch, push); what remains before ship is Batch 8 — the public benchmark, published witness catch rate, and independent review."
+description: "OGMA — One Graph, Many Audiences. Read a codebase once into a receipt-backed model (the Ogham), then render it per audience: implementation notes for engineers, a feature-first PRD for business readers, click-by-click guides for end users. Every fact carries a verified code citation; every output ships with a deterministic certificate. STATUS: every power is live (init, terrain, graph, ingest, renderers, gate, map, watch, push); the OSS-fixture benchmark, published witness catch rate (10/10 lies caught, 0/9 false refutations) and independent review are done. What remains before public ship: the blind ship panel passing, and publication."
 ---
 
 # OGMA — One Graph, Many Audiences
@@ -8,10 +8,12 @@ description: "OGMA — One Graph, Many Audiences. Read a codebase once into a re
 > **Build status: every power is live.** Read (`init`, `terrain`, `graph`,
 > `ingest`), render (`prd`, `explain`, `guides`, `questions`, `map`), certify
 > (`gate`), stay current (`watch`), and deliver (`push`) all work; the
-> protocols below are in force. What remains before public ship is Batch 8:
-> the OSS-fixture benchmark, the published witness catch rate, and the
-> independent review. Do not simulate anything — every power is real, and
-> `ogma --help` stays the honest status board.
+> protocols below are in force. The OSS-fixture benchmark, the published
+> witness catch rate (10/10 seeded lies caught, 0/9 true statements falsely
+> refuted — `benchmarks/oss-fixture/`) and the independent maker-checker
+> review are done. What remains before public ship: the blind ship panel
+> passing on the finished tree, then publication. Do not simulate anything —
+> every power is real, and `ogma --help` stays the honest status board.
 
 ## The read protocol (how a host agent inscribes an Ogham)
 
@@ -101,13 +103,16 @@ classified **LIVE** (wired end to end), **DEAD** (unreferenced — never shown t
 business readers), **HALF-BUILT** (partially wired — ledger, never narrated as
 working), or **UNCLEAR** (ledger, with the specific question).
 
-Nothing is "done" until `ogma gate` passes nine deterministic checks and emits
+Nothing is "done" until `ogma gate` passes ten deterministic checks and emits
 a certificate — including that every fact holds a witness ruling and every
 **LIVE** fact holds a fresh CONFIRMED one. A non-confirmed ruling demotes its
 fact into the ledger; that is a legal, certifiable end state, not a failure.
 The gate also refuses to certify an Ogham that is not bound to the repository's
-current HEAD. When the code moves, `ogma watch` invalidates only the receipts
-the diff touched and refreshes only those facts — then re-certifies.
+current HEAD, a fact whose cited code moved since it was verified, or a
+rendered document that no longer byte-matches the Ogham. When the code moves,
+`ogma watch` invalidates only the receipts the diff touched and refreshes only
+those facts — then re-certifies; skipping watch cannot help, because ingest
+and the gate prove the same currency signal independently.
 
 ## The contract with the host agent
 

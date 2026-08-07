@@ -74,9 +74,9 @@ function moduleDoc(over) { return { ...cleanModule, ...over }; }
 // ---- constants pinned -----------------------------------------------------
 
 console.log('constants:');
-check('GATE_CHECKS is exactly the nine checks', () => {
-  assert(S.GATE_CHECKS.length === 9, `expected 9, got ${S.GATE_CHECKS.length}`);
-  for (const c of ['coverage','receipts','witness','leaklint','complete','ledger','orphans','readability','integrity']) {
+check('GATE_CHECKS is exactly the ten checks', () => {
+  assert(S.GATE_CHECKS.length === 10, `expected 10, got ${S.GATE_CHECKS.length}`);
+  for (const c of ['coverage','receipts','witness','leaklint','complete','ledger','orphans','readability','integrity','freshness']) {
     assert(S.GATE_CHECKS.includes(c), `missing check ${c}`);
   }
 });
@@ -1369,8 +1369,8 @@ async function graphChecks() {
 // A complete, VALID mini-Ogham on a real git repo. Every planted violation
 // below clones this base and breaks exactly one thing; the forged-hash and
 // mutation cases keep this self-authored fixture honest.
-async function buildWholeOgham() {
-  const dir = makeFixtureRepo(GRAPH_FILES);
+async function buildWholeOgham(extraFiles = {}) {
+  const dir = makeFixtureRepo({ ...GRAPH_FILES, ...extraFiles });
   cmdInit(dir, quiet);
   const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
   fs.writeFileSync(path.join(dir, '.ogma/ogham/terrain.json'), JSON.stringify({
@@ -1624,13 +1624,16 @@ async function gateChecks() {
   const certOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.ogma/certificate.json'), 'utf8'));
   const failing = (cert, name) => cert.checks.find(c => c.check === name && c.pass === false);
 
-  await checkAsync('a whole, rendered, bound Ogham certifies: PASS, 9/9, certificate validates', async () => {
+  await checkAsync('a whole, rendered, bound Ogham certifies: PASS, 10/10, certificate validates', async () => {
     const b = await certifiable();
     const msgs = [];
     assert(GATE.cmdGate(b.dir, m => msgs.push(m)) === 0, 'gate failed a certifiable Ogham: ' + msgs.join(' | '));
     const cert = certOf(b.dir);
     assert(errorsOf(S.validateCertificate, cert).length === 0, 'certificate invalid');
-    assert(cert.pass === true && cert.checks.length === 9 && cert.checks.every(c => c.pass), 'not 9/9');
+    assert(cert.pass === true && cert.checks.length === 10 && cert.checks.every(c => c.pass), 'not 10/10');
+    assert(Array.isArray(cert.documents) && cert.documents.length > 0
+      && cert.documents.every(d => /^[0-9a-f]{64}$/.test(d.sha256)), 'certificate does not bind document bytes');
+    assert(!cert.documents.some(d => /^map\./.test(d.path)), 'map views must not be listed as certified bytes');
     assert(msgs.some(m => m.includes('PASS')), 'no badge line');
   });
   await checkAsync('a missing expected document fails coverage — and the certificate says FAIL', async () => {
@@ -1642,14 +1645,23 @@ async function gateChecks() {
     assert(failing(cert, 'coverage').detail.includes('map.md'), 'missing doc not named');
   });
   await checkAsync('leaklint: technical vocabulary in the PRD fails; the same word in a code span is exempt', async () => {
+    // The code-span exemption is pinned at the unit level: schema-level prose
+    // rules now keep backticks out of every authored field, so a code span
+    // can no longer be smuggled INTO a business document — but receipts and
+    // hand-written extras must stay exempt wherever the lint runs.
+    assert(GATE.leakHits('See the `endpoint` label on screen.', []).length === 0, 'a code-span term was counted as a leak');
+    assert(GATE.leakHits('Our API endpoint returns a JSON payload.', []).length > 0, 'a plain technical term passed the unit lint');
+    // The gate-level path: a term the config bans that genuinely renders in
+    // the PRD (out documents are Ogham-derived now — hand-appending to
+    // out/prd.md fails freshness, so the leak must arrive through content).
     const b = await certifiable();
-    const prd = path.join(b.dir, '.ogma/out/prd.md');
-    fs.appendFileSync(prd, '\nSee the `endpoint` label on screen.\n');
-    assert(GATE.cmdGate(b.dir, quiet) === 0, 'a code-span term was counted as a leak');
-    fs.appendFileSync(prd, '\nOur API endpoint returns a JSON payload.\n');
-    assert(GATE.cmdGate(b.dir, quiet) === 1, 'a plain technical term passed the lint');
+    const cfgPath = path.join(b.dir, '.ogma/config.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.leaklint_extra = ['payment'];   // present in the fixture fact statement
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'a banned term rendered in the PRD passed the lint');
     const det = failing(certOf(b.dir), 'leaklint').detail;
-    assert(det.includes('endpoint') && det.includes('prd.md'), 'leak not named with its file: ' + det);
+    assert(det.includes('payment') && det.includes('prd.md'), 'leak not named with its file: ' + det);
   });
   await checkAsync('readability is measured per document against config', async () => {
     const b = await certifiable();
@@ -2210,22 +2222,32 @@ async function pushChecks() {
       assert(await P.cmdPush(b.dir, [], m => msgs2.push(m), env) === 0, 'replay failed');
       assert([...pages.values()].map(p => p.version.number).join() === versions1.join(), 'replay bumped versions with identical content');
       assert(msgs2.every(m => !m.includes('created')), 'replay re-created pages');
-      // edit one document -> exactly that page updates, version 2, same id
-      const qPath = path.join(b.dir, '.ogma/out/questions.md');
-      fs.writeFileSync(qPath, fs.readFileSync(qPath, 'utf8') + '\nAll clear.\n');
+      // edit one document -> exactly that page updates, version 2, same id.
+      // The edit goes THROUGH the Ogham (new ledger question -> re-render ->
+      // re-gate): hand-editing out/questions.md now fails the freshness
+      // check and the certificate byte-binding, by design.
+      const ledgerPath = path.join(b.dir, '.ogma/ogham/ledger.json');
+      const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+      ledger.questions.push({
+        id: 'Q-push-edit', question: 'Does the update path deliver in place',
+        status: 'open', receipts: ledger.questions[0].receipts
+      });
+      fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2) + '\n');
+      assert(require('../lib/render').cmdQuestions(b.dir, quiet) === 0, 'questions re-render failed');
+      assert(require('../lib/gate').cmdGate(b.dir, quiet) === 0, 're-gate after ledger edit failed');
       const before = new Map(st.files.map(f => [f.path, f.page_id]));
       const msgs3 = [];
       assert(await P.cmdPush(b.dir, [], m => msgs3.push(m), env) === 0, 'update push failed: ' + msgs3.join(' | '));
       const st3 = stateOf(b);
       assert(st3.files.find(f => f.path === 'questions.md').page_id === before.get('questions.md'), 'update changed the page id');
       const qPage = pages.get(before.get('questions.md'));
-      assert(qPage.version.number === 2 && qPage.body.includes('All clear.'), 'update not applied in place');
+      assert(qPage.version.number === 2 && qPage.body.includes('Does the update path deliver in place'), 'update not applied in place');
       assert([...st3.files].filter(f => f.path !== 'questions.md').every(f => pages.get(f.page_id).version.number === 1), 'unrelated pages re-written');
     } finally {
       server.close();
     }
   });
-  await checkAsync('a lying destination is caught by fetch-back: 200 on write, wrong content on read — push fails, no state recorded', async () => {
+  await checkAsync('a lying destination is caught by fetch-back: 200 on write, wrong content on read — push fails, nothing records as verified', async () => {
     const http = require('http');
     // Accepts every write, then serves back an empty page: the API said yes,
     // the content is not there. Exactly the failure an API-200-is-proof
@@ -2252,7 +2274,14 @@ async function pushChecks() {
       assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), env) === 1,
         'a write that read back wrong was reported as delivered');
       assert(msgs.join(' ').includes('did not verify') || msgs.join(' ').includes('verify'), 'failure not named as a verification failure');
-      assert(!fs.existsSync(statePath(b)), 'push-state recorded an unverified delivery');
+      // The created page EXISTS on the remote even though its content lied on
+      // read-back. It is recorded — marked verified:false so replay never
+      // skips it and the next push updates instead of duplicating — but it
+      // must never be recorded AS verified.
+      const st = JSON.parse(fs.readFileSync(statePath(b), 'utf8'));
+      assert(st.files.length === 1 && st.files[0].verified === false && st.files[0].page_id === '500',
+        'the unverified created page was not recorded as unverified');
+      assert(msgs.join(' ').includes('UNVERIFIED'), 'the orphaned page was not reported');
     } finally {
       server.close();
     }
@@ -2324,6 +2353,197 @@ await mapChecks();
 await watchChecks();
 await debtChecks();
 await pushChecks();
+await batch9Checks();
+
+// ---- batch 9: the ship-panel findings, each pinned -------------------------
+
+async function batch9Checks() {
+  console.log('batch 9 (ship-panel findings):');
+  const GATE = require('../lib/gate');
+  const R = require('../lib/render');
+  const P = require('../lib/push');
+  const V9 = require('../lib/verify');
+  const G9 = require('../lib/graph');
+
+  // The full pipeline to a certified state, shared by several tests here.
+  async function certified9(extraFiles) {
+    const b = await buildWholeOgham(extraFiles);
+    assert(cmdIngest(b.dir, quiet) === 0, 'b9 fixture: ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'b9 fixture: render failed');
+    assert(require('../lib/map').cmdMap(b.dir, quiet) === 0, 'b9 fixture: map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'b9 fixture: gate failed');
+    return b;
+  }
+  const certOf9 = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.ogma/certificate.json'), 'utf8'));
+  const failing9 = (cert, name) => cert.checks.find(c => c.check === name && c.pass === false);
+
+  await checkAsync('SHIP-01: after a commit touches cited code, ingest refuses, watch invalidates, gate refuses — the ordinary workflow cannot certify a lie', async () => {
+    const b = await certified9();
+    // Change the cited line (the probe scenario: raise the limit) and commit.
+    const rules = path.join(b.dir, 'src/rules.ts');
+    fs.writeFileSync(rules, fs.readFileSync(rules, 'utf8').replace('x < 500', 'x < 1000'));
+    gitIn(b.dir, ['add', '-A']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'raise limit']);
+    // graph -> ingest (the exact sequence that used to certify PASS over a lie)
+    assert(await G9.cmdGraph(b.dir, quiet) === 0, 'graph re-index failed');
+    const msgs = [];
+    assert(cmdIngest(b.dir, m => msgs.push(m)) === 1, 'ingest advanced the cutoff over moved cited code');
+    assert(msgs.join(' ').includes('cited code moved'), 'the refusal does not name the moved code: ' + msgs.join(' | ').slice(0, 300));
+    // The manifest did NOT advance, so watch still sees the gap and works.
+    const m1 = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/ogham/manifest.json'), 'utf8'));
+    assert(!S.sameCommit(m1.cutoff_commit, gitIn(b.dir, ['rev-parse', 'HEAD']).trim()), 'cutoff advanced despite the refusal — watch is disarmed');
+    const wmsgs = [];
+    assert(require('../lib/watch').cmdWatch(b.dir, m => wmsgs.push(m)) === 0, 'watch failed');
+    assert(wmsgs.some(m => m.includes('stale') && m.includes('FACT-payments-001')), 'watch did not invalidate the touched fact');
+    // And the gate independently refuses the stale state.
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'gate certified a stale fact');
+    const f = failing9(certOf9(b.dir), 'freshness');
+    assert(f && f.detail.includes('stale'), 'freshness did not name the stale fact');
+  });
+  await checkAsync('SHIP-01: a hand-edited rendered document fails freshness — prose is bound to the Ogham', async () => {
+    const b = await certified9();
+    fs.appendFileSync(path.join(b.dir, '.ogma/out/prd.md'), '\nThe limit is a million dollars.\n');
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'an edited PRD certified');
+    const f = failing9(certOf9(b.dir), 'freshness');
+    assert(f && f.detail.includes('prd.md') && f.detail.includes('does not match'), 'freshness did not name the drifted document');
+  });
+  await checkAsync('SHIP-01: a missing or off-HEAD graph fails freshness at the gate', async () => {
+    const b = await certified9();
+    fs.rmSync(path.join(b.dir, '.ogma/ogham/graph/index.json'));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'gate certified without a graph');
+    const f = failing9(certOf9(b.dir), 'freshness');
+    assert(f && f.detail.includes('graph'), 'freshness did not name the graph');
+  });
+  await checkAsync('SHIP-02: multi-line and backtick prose is refused at the schema — the leaklint bypass payload cannot enter the Ogham', async () => {
+    // The maker-reproduced bypass payload from the ship panel, verbatim.
+    const bypass = 'Pay your bill online.\n# this uses the http api endpoint and a database\nAll good.';
+    assert(errorsOf(S.validateFact, fact({ statement: bypass })).some(e => e.includes('single-line')), 'a newline-bearing statement validated');
+    assert(errorsOf(S.validateFact, fact({ statement: 'uses the `api` quietly' })).some(e => e.includes('single-line')), 'a backtick-bearing statement validated');
+    assert(errorsOf(S.validateFeature, feature({ does: 'Click.\n# http api database' })).length > 0, 'a newline-bearing narration validated');
+    assert(errorsOf(S.validateLedgerEntry, { id: 'Q-x', question: 'why `api`?', status: 'open', receipts: [cleanFact.receipts[0]] }).some(e => e.includes('single-line')), 'a backtick-bearing question validated');
+  });
+  await checkAsync('SHIP-03: init refuses a repo-supplied confluence targeting block, not just kind/asked', async () => {
+    const dir = tmpdir();
+    fs.mkdirSync(path.join(dir, '.ogma'), { recursive: true });
+    const cfg = S.defaultConfig('x');
+    cfg.destination.confluence = { space_key: 'EVIL', parent_page_id: '666' };
+    fs.writeFileSync(path.join(dir, '.ogma/config.json'), JSON.stringify(cfg, null, 2));
+    const msgs = [];
+    assert(cmdInit(dir, m => msgs.push(m)) === 1, 'init accepted a pre-seeded targeting block');
+    assert(msgs.join(' ').includes('targeting block'), 'refusal does not name the targeting block');
+  });
+  await checkAsync('SHIP-03: push refuses when the repo itself ships .ogma/config.json', async () => {
+    const b = await certified9({ '.ogma/config.json': JSON.stringify(S.defaultConfig('x'), null, 2) + '\n' });
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m), {}) === 1, 'push trusted a repo-tracked config');
+    assert(msgs.join(' ').includes('tracked in this repository'), 'refusal does not name the tracked file');
+    assert(!fs.existsSync(path.join(b.dir, '.ogma/push-state.json')), 'a refused push left state behind');
+  });
+  await checkAsync('SHIP-04: a repo-planted symlink under .ogma is refused by every write path (shared guarded write)', async () => {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'fixture ingest failed');
+    const outside = tmpdir();
+    const outDir = path.join(b.dir, '.ogma/out');
+    fs.rmSync(outDir, { recursive: true, force: true });
+    fs.symlinkSync(outside, outDir, 'junction');
+    const msgs = [];
+    assert(R.cmdPrd(b.dir, m => msgs.push(m)) === 1, 'render wrote through a symlinked out/');
+    assert(msgs.join(' ').includes('symlink'), 'refusal does not name the symlink');
+    assert(fs.readdirSync(outside).length === 0, 'bytes escaped through the link');
+    // The certifying write is guarded by the same implementation. (A junction
+    // stands in for the link: file symlinks need elevation on win32, and
+    // refuseSymlink treats both as links.)
+    fs.rmSync(path.join(b.dir, '.ogma/certificate.json'), { force: true });
+    fs.symlinkSync(outside, path.join(b.dir, '.ogma/certificate.json'), 'junction');
+    const gmsgs = [];
+    assert(GATE.cmdGate(b.dir, m => gmsgs.push(m)) === 1, 'gate wrote a certificate through a symlink');
+    assert(gmsgs.join(' ').includes('symlink'), 'gate refusal does not name the symlink');
+  });
+  await checkAsync('SHIP-05: value-position references (exports, returns, assignments) are graph occurrences — genuine receipts verify', async () => {
+    const filler = 'const pad = 0;\n'.repeat(20);
+    const body = 'function pay() { return 1; }\n' + filler
+      + 'module.exports = { pay };\n'          // line 22
+      + 'function useIt() { return pay; }\n'   // line 23: return-position
+      + 'const alias = pay;\n';                // line 24: assignment-position
+    const files = { 'src/mod.js': body };
+    const read = (p) => files[p] || null;
+    const { index } = await G9.indexTree({
+      entries: [{ path: 'src/mod.js', size: Buffer.byteLength(body) }],
+      readText: read, commit: 'abc1234'
+    });
+    for (const line of [22, 23, 24]) {
+      const v = V9.verifyReceipt({ file: 'src/mod.js', line, symbol: 'pay' }, read, index);
+      assert(v.ok === true, `a genuine value-position reference at line ${line} was rejected: ${v.detail || ''}`);
+    }
+    // The tightening still works: a comment mention far from any occurrence still fails.
+    const far = 'function pay2() { return 1; }\n' + '// no calls here\n' + 'const a = 1;\n'.repeat(20) + '// pay2 is mentioned here in a comment only\n';
+    const files2 = { 'src/far.js': far };
+    const read2 = (p) => files2[p] || null;
+    const { index: idx2 } = await G9.indexTree({
+      entries: [{ path: 'src/far.js', size: Buffer.byteLength(far) }], readText: read2, commit: 'abc1234'
+    });
+    const mention = V9.verifyReceipt({ file: 'src/far.js', line: 23, symbol: 'pay2' }, read2, idx2);
+    assert(mention.ok === false, 'a comment-only mention verified — the refinement stopped tightening');
+  });
+  await checkAsync('certificate binds document bytes: a doc edited after the gate refuses to push', async () => {
+    const b = await certified9();
+    fs.appendFileSync(path.join(b.dir, '.ogma/out/prd.md'), '\nEdited after the gate.\n');
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m), {}) === 1, 'an edited document shipped under the certified banner');
+    assert(msgs.join(' ').includes('changed after the gate'), 'refusal does not name the drift');
+  });
+  await checkAsync('coverage matches module headings as whole lines, not substrings', async () => {
+    const b = await certified9();
+    const prdPath = path.join(b.dir, '.ogma/out/prd.md');
+    fs.writeFileSync(prdPath, fs.readFileSync(prdPath, 'utf8').replace('## Payments', '#### Payments'));
+    assert(GATE.cmdGate(b.dir, quiet) === 1, 'a demoted module heading certified');
+    const f = failing9(certOf9(b.dir), 'coverage');
+    assert(f && f.detail.includes('payments'), 'coverage did not name the absent module');
+  });
+  await checkAsync('a markdown-only push preserves page-id mappings from an earlier page-backed push', async () => {
+    const b = await certified9();
+    const prd = fs.readFileSync(path.join(b.dir, '.ogma/out/prd.md'), 'utf8');
+    const crypto9 = require('crypto');
+    const state = {
+      push_state_version: S.PUSH_STATE_VERSION, kind: 'confluence',
+      commit: b.head, delivered_at: '2026-08-08T00:00:00Z',
+      files: [{ path: 'prd.md', sha256: crypto9.createHash('sha256').update(prd, 'utf8').digest('hex'), page_id: '4242' }]
+    };
+    assert(errorsOf(S.validatePushState, state).length === 0, 'fixture state invalid');
+    fs.writeFileSync(path.join(b.dir, '.ogma/push-state.json'), JSON.stringify(state, null, 2) + '\n');
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], quiet, {}) === 0, 'markdown-only push failed');
+    const st = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/push-state.json'), 'utf8'));
+    assert(st.files.find(f => f.path === 'prd.md').page_id === '4242', 'the page-id mapping was wiped — the next confluence push would create duplicates');
+  });
+  await checkAsync('a corrupt certificate is reported as corrupt by the map, not as "not yet run"', async () => {
+    const b = await certified9();
+    fs.writeFileSync(path.join(b.dir, '.ogma/certificate.json'), '{ not json');
+    assert(require('../lib/map').cmdMap(b.dir, quiet) === 0, 'map failed on a corrupt certificate');
+    const md = fs.readFileSync(path.join(b.dir, '.ogma/out/map.md'), 'utf8');
+    assert(md.includes('unreadable'), 'corrupt certificate conflated with absent');
+    const html = fs.readFileSync(path.join(b.dir, '.ogma/out/map.html'), 'utf8');
+    assert(html.includes('CERT UNREADABLE'), 'dashboard does not distinguish corrupt from absent');
+  });
+  await checkAsync('an uncitable-only repo and a commitless repo refuse with honest sentences', async () => {
+    // Commitless: git internals must not leak into the answer.
+    const dir = tmpdir();
+    fs.writeFileSync(path.join(dir, 'x.js'), 'x');
+    gitIn(dir, ['init', '-q']);
+    fs.mkdirSync(path.join(dir, '.ogma/ogham'), { recursive: true });
+    const m1 = [];
+    assert(cmdTerrain(dir, m => m1.push(m)) === 1, 'terrain ran on a commitless repo');
+    assert(m1.join(' ').includes('not a git repository with commits'), 'commitless refusal is not honest: ' + m1.join(' | '));
+    // Uncitable-only: every tracked path fails the citability rule (a leading
+    // dash is argv-shaped). The answer names the problem, not the validator.
+    const dir2 = makeFixtureRepo({ '-x.js': 'x' });
+    fs.mkdirSync(path.join(dir2, '.ogma/ogham'), { recursive: true });
+    const m2 = [];
+    assert(cmdTerrain(dir2, m => m2.push(m)) === 1, 'terrain wrote a terrain with zero surfaces');
+    assert(m2.join(' ').includes('nothing citable'), 'uncitable refusal is not honest: ' + m2.join(' | '));
+    assert(!m2.join(' ').includes('surfaces must be'), 'the validator leaked into the user-facing answer');
+  });
+}
 
 // ---- CLI process-level behavior -------------------------------------------
 
