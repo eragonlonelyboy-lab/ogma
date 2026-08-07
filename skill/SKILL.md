@@ -1,14 +1,17 @@
 ---
 name: ogma
-description: "OGMA — One Graph, Many Audiences. Read a codebase once into a receipt-backed model (the Ogham), then render it per audience: implementation notes for engineers, a feature-first PRD for business readers, click-by-click guides for end users. Every fact carries a verified code citation; every output ships with a deterministic certificate. STATUS: the READ half is live (init, terrain, graph, ingest + the read protocol); renderers, watch, push, and the gate are still unbuilt and refuse to fake a run."
+description: "OGMA — One Graph, Many Audiences. Read a codebase once into a receipt-backed model (the Ogham), then render it per audience: implementation notes for engineers, a feature-first PRD for business readers, click-by-click guides for end users. Every fact carries a verified code citation; every output ships with a deterministic certificate. STATUS: every power is live (init, terrain, graph, ingest, renderers, gate, map, watch, push); what remains before ship is Batch 8 — the public benchmark, published witness catch rate, and independent review."
 ---
 
 # OGMA — One Graph, Many Audiences
 
-> **Build status: the READ half is live.** `ogma init`, `ogma terrain`,
-> `ogma graph`, and `ogma ingest` work; the read protocol below is in force.
-> Renderers, watch, push, and the gate are not built yet — `ogma --help`
-> reports per-power status honestly. Do not simulate an unbuilt power.
+> **Build status: every power is live.** Read (`init`, `terrain`, `graph`,
+> `ingest`), render (`prd`, `explain`, `guides`, `questions`, `map`), certify
+> (`gate`), stay current (`watch`), and deliver (`push`) all work; the
+> protocols below are in force. What remains before public ship is Batch 8:
+> the OSS-fixture benchmark, the published witness catch rate, and the
+> independent review. Do not simulate anything — every power is real, and
+> `ogma --help` stays the honest status board.
 
 ## The read protocol (how a host agent inscribes an Ogham)
 
@@ -44,6 +47,40 @@ Deterministic scaffold first, judgment second, deterministic check last.
    both directions, every receipt against the repo, and every witness
    binding, then writes the manifest. Fix everything it names and re-run to
    zero. An ingest that will not pass is a read that is not done.
+
+## The watch protocol (when the code moves)
+
+Run `ogma watch`. It diffs each fact's verified commit against HEAD, marks
+stale ONLY the facts whose cited code the diff touched (fact receipts and
+path-hop receipts both count), names each with its reason, and advances the
+manifest. Then the surgical refresh — judgment work, done fact by fact:
+
+1. For each stale fact: re-read the cited code at HEAD (`git show`), rewrite
+   the statement if the behavior changed, fix receipts to the code's new
+   location, re-witness blind (same rule as the read protocol), set
+   `verified_at_commit` to HEAD and `status` to `fresh`. A fact whose code is
+   gone is reclassified (DEAD, or ledgered) — never silently deleted, and IDs
+   are NEVER renumbered.
+2. `ogma ingest` to zero, re-render every enabled audience, `ogma map`, then
+   `ogma gate` — renders produced before the watch may still carry
+   since-staled facts, so re-rendering before the gate is part of the loop.
+
+Never re-read fresh facts "while you're in there" — the diff decided the
+worklist, and re-reading unchanged code proves nothing.
+
+## The push protocol (delivering the fleet)
+
+`ogma push` delivers the certified fleet to the destination the user chose.
+The CLI enforces: consent recorded by the ask-once flow (never adopted from a
+repo-supplied config), certificate present + passing + at HEAD, and — for
+page-backed destinations — every write verified by reading it back before
+push-state records it. First run: `ogma push` with nothing configured prints
+what it detected and how to choose; the choice persists. Confluence needs
+`CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` in the
+environment — secrets never enter config or state. The local `out/` fleet
+stays canonical regardless of destination; ask the user before the first push
+to any external system, every time — the CLI's consent gate is not a
+substitute for the conversation.
 
 ## What OGMA is (when complete)
 

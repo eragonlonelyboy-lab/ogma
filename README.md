@@ -28,10 +28,13 @@ then renders that one model for every audience:
 
 ## Status
 
-**In development — pre-release.** The data model and CLI skeleton exist; the
-pipeline does not yet. `ogma --help` reports the honest per-power status.
-This repo goes public only when the whole pipeline works and the benchmark
-certificate passes.
+**In development — pre-release.** Every power is built and benched: read
+(`init`/`terrain`/`graph`/`ingest`), render (`prd`/`explain`/`guides`/
+`questions`/`map`), certify (`gate`), stay current (`watch`), deliver
+(`push`). What remains before release is the proof pass: the public
+OSS-fixture benchmark, the published witness catch rate, and independent
+review. This repo goes public only when that passes — `ogma --help` stays the
+honest per-power status board.
 
 ```
 npm install    # nothing to install yet beyond node >= 18

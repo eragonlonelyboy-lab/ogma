@@ -1764,6 +1764,353 @@ async function mapChecks() {
   });
 }
 
+// ---- Batch 7: watch — receipt invalidation --------------------------------
+
+async function watchChecks() {
+  console.log('watch:');
+  const WATCH = require('../lib/watch');
+
+  // A whole, ingested Ogham in a real repo; then commits land on top.
+  async function ingested() {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'watch fixture: ingest failed');
+    return b;
+  }
+  const commitChange = (dir, rel, body) => {
+    fs.writeFileSync(path.join(dir, rel), body);
+    gitIn(dir, ['add', '-A']);
+    gitIn(dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'change']);
+    return gitIn(dir, ['rev-parse', 'HEAD']).trim();
+  };
+  const factsOf = (b) => JSON.parse(fs.readFileSync(b.factsPath, 'utf8')).facts;
+  const manifestOf = (b) => JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/ogham/manifest.json'), 'utf8'));
+
+  check('hunk parsing: old-side intervals exact, insertions carry count 0', () => {
+    const t = 'diff --git a/x b/x\n@@ -4,3 +4,2 @@ ctx\n-a\n@@ -9 +8 @@\n-b\n@@ -12,0 +12,5 @@\n+c\n';
+    assert(JSON.stringify(WATCH.parseHunkIntervals(t)) ===
+      JSON.stringify([{ start: 4, count: 3 }, { start: 9, count: 1 }, { start: 12, count: 0 }]),
+      'intervals: ' + JSON.stringify(WATCH.parseHunkIntervals(t)));
+  });
+  check('touch rule: overlap on both boundaries, insertion boundary conservative', () => {
+    const touch = (ivs, lo, hi) => WATCH.hunksTouch(ivs, lo, hi);
+    assert(touch([{ start: 10, count: 1 }], 10, 12), 'exact start missed');
+    assert(touch([{ start: 8, count: 3 }], 10, 12), 'leading overlap missed');
+    assert(touch([{ start: 12, count: 5 }], 10, 12), 'trailing overlap missed');
+    assert(!touch([{ start: 13, count: 2 }], 10, 12), 'past-the-end counted');
+    assert(!touch([{ start: 1, count: 8 }], 10, 12), 'before-the-start counted');
+    assert(touch([{ start: 9, count: 0 }], 10, 12), 'insertion at lo-1 (lands at lo) missed');
+    assert(touch([{ start: 12, count: 0 }], 10, 12), 'insertion at hi missed');
+    assert(!touch([{ start: 13, count: 0 }], 10, 12), 'insertion after hi counted');
+  });
+  await checkAsync('an edit inside a cited window marks exactly the citing facts stale', async () => {
+    const b = await ingested();
+    // handlers.ts is cited only by FACT-001's path hop (line 1, window 1..6);
+    // FACT-002 cites rules.ts:7 only. Appending inside handlers.ts touches 001, not 002.
+    commitChange(b.dir, 'src/handlers.ts',
+      'export function payHandler(req) {\n  return checkLimits(req.amount);\n}\nconst helper = (x) => transform(x);\nconst extra = 1;\n');
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 0, 'watch failed: ' + msgs.join(' | '));
+    const facts = factsOf(b);
+    assert(facts.find(f => f.id === 'FACT-payments-001').status === 'stale', 'touched fact not stale');
+    assert(facts.find(f => f.id === 'FACT-payments-002').status !== 'stale', 'untouched fact went stale');
+    assert(msgs.some(m => m.includes('FACT-payments-001')), 'stale fact not named in the report');
+  });
+  await checkAsync('an edit touching no cited code leaves every fact fresh and still advances the manifest', async () => {
+    const b = await ingested();
+    const head2 = commitChange(b.dir, 'src/Api.cs',
+      'public class PaymentsController {\n  public void Pay() { Validate(); }\n  private void Validate() {}\n}\n// note\n');
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 0, 'watch failed');
+    assert(factsOf(b).every(f => f.status !== 'stale'), 'a fact went stale with no cited code touched');
+    assert(S.sameCommit(manifestOf(b).cutoff_commit, head2), 'manifest did not advance');
+    assert(msgs.some(m => m.includes('stays fresh') || m.includes('stay fresh')), 'no all-fresh line');
+  });
+  await checkAsync('watch never renumbers: only status changes, every other byte of every fact rides through', async () => {
+    const b = await ingested();
+    const before = factsOf(b);
+    commitChange(b.dir, 'src/rules.ts', GRAPH_FILES['src/rules.ts'] + 'export function extraRule(x) { return x; }\n');
+    assert(WATCH.cmdWatch(b.dir, quiet) === 0, 'watch failed');
+    const after = factsOf(b);
+    assert(before.length === after.length, 'fact count changed');
+    for (let i = 0; i < before.length; i++) {
+      const a = { ...after[i] }; const w = { ...before[i] };
+      delete a.status; delete w.status;
+      assert(JSON.stringify(a) === JSON.stringify(w), `${before[i].id}: a non-status field changed`);
+      assert(after[i].id === before[i].id, 'id changed');
+    }
+  });
+  await checkAsync('current Ogham: nothing moved, nothing written, exit 0', async () => {
+    const b = await ingested();
+    const beforeManifest = fs.readFileSync(path.join(b.dir, '.ogma/ogham/manifest.json'), 'utf8');
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 0, 'watch failed on a current Ogham');
+    assert(msgs.some(m => m.includes('nothing to do')), 'no current-line');
+    assert(fs.readFileSync(path.join(b.dir, '.ogma/ogham/manifest.json'), 'utf8') === beforeManifest, 'manifest rewritten for nothing');
+  });
+  await checkAsync('watch without a manifest refuses and points at ingest', async () => {
+    const b = await buildWholeOgham(); // no ingest
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 1, 'ran without a manifest');
+    assert(msgs.join(' ').includes('ogma ingest'), 'did not point at ingest');
+  });
+  await checkAsync('a fact whose verified commit cannot be diffed goes stale — never skip-and-pass', async () => {
+    const b = await ingested();
+    const doc = JSON.parse(fs.readFileSync(b.factsPath, 'utf8'));
+    const gone = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    doc.facts[0].verified_at_commit = gone;
+    doc.facts[0].witness.checked_at_commit = gone; // keep ruling freshness legal
+    fs.writeFileSync(b.factsPath, JSON.stringify(doc, null, 2));
+    commitChange(b.dir, 'src/Api.cs', GRAPH_FILES['src/Api.cs'] + '// move\n');
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 0, 'watch failed');
+    assert(factsOf(b)[0].status === 'stale', 'undiffable fact not marked stale');
+    assert(msgs.some(m => m.includes('cannot be diffed')), 'reason not named');
+  });
+  await checkAsync('already-stale facts are not re-marked, and the report says they still await re-read', async () => {
+    const b = await ingested();
+    const doc = JSON.parse(fs.readFileSync(b.factsPath, 'utf8'));
+    doc.facts[0].status = 'stale';
+    fs.writeFileSync(b.factsPath, JSON.stringify(doc, null, 2));
+    commitChange(b.dir, 'src/Api.cs', GRAPH_FILES['src/Api.cs'] + '// again\n');
+    const msgs = [];
+    assert(WATCH.cmdWatch(b.dir, m => msgs.push(m)) === 0, 'watch failed');
+    assert(msgs.some(m => m.includes('already stale')), 'awaiting-re-read line missing');
+    assert(!msgs.some(m => m.startsWith('  stale  FACT-payments-001')), 'already-stale fact re-reported as newly stale');
+  });
+}
+
+// ---- Batch 7: push — consent, certification, delivery ---------------------
+
+async function pushChecks() {
+  console.log('push:');
+  const P = require('../lib/push');
+  const GATE = require('../lib/gate');
+  const R = require('../lib/render');
+  const M = require('../lib/map');
+
+  async function certified() {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'push fixture: ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'push fixture: render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'push fixture: map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'push fixture: gate failed');
+    return b;
+  }
+  const configOf = (b) => JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/config.json'), 'utf8'));
+  const stateOf = (b) => JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/push-state.json'), 'utf8'));
+  const statePath = (b) => path.join(b.dir, '.ogma/push-state.json');
+
+  check('md->storage: closed dialect converts, everything else stays escaped text', () => {
+    const md = '# Title <x>\n\nA **bold** and `code` line & more.\n\n_An aside._\n\n- one\n- two\n  - nested\n- three\n\n1. first\n2. second\n';
+    const s = P.mdToStorage(md);
+    assert(s.includes('<h1>Title &lt;x&gt;</h1>'), 'heading not converted/escaped: ' + s.split('\n')[0]);
+    assert(s.includes('<strong>bold</strong>') && s.includes('<code>code</code>') && s.includes('&amp; more'), 'inline marks wrong');
+    assert(s.includes('<p><em>An aside.</em></p>'), 'aside not em');
+    assert(s.includes('<ul><li>one') && s.includes('<ol><li>first'), 'lists not opened');
+    const opens = (s.match(/<li>/g) || []).length; const closes = (s.match(/<\/li>/g) || []).length;
+    assert(opens === closes, `li open/close mismatch: ${opens}/${closes}`);
+    assert(s.includes('<ul><li>nested</li></ul>'), 'nesting broken: ' + s);
+  });
+  check('md->storage: fact-ID annotations never reach a delivered body', () => {
+    const s = P.mdToStorage('## F <!-- feature:FEAT-x -->\n\n- claim <!-- fact:FACT-y -->\n');
+    assert(!s.includes('fact:') && !s.includes('feature:') && !s.includes('&lt;!--'), 'annotation leaked: ' + s);
+  });
+  check('push-state validator: clean passes, planted violations rejected, hostile never throws', () => {
+    const clean = {
+      push_state_version: 1, kind: 'markdown-only', commit: 'a1b2c3d',
+      delivered_at: '2026-08-07T00:00:00Z',
+      files: [{ path: 'prd.md', sha256: 'a'.repeat(64) }]
+    };
+    assert(errorsOf(S.validatePushState, clean).length === 0, 'clean rejected: ' + errorsOf(S.validatePushState, clean)[0]);
+    assert(errorsOf(S.validatePushState, { ...clean, kind: null }).length > 0, 'null kind passed');
+    assert(errorsOf(S.validatePushState, { ...clean, kind: 'ftp' }).length > 0, 'unknown kind passed');
+    assert(errorsOf(S.validatePushState, { ...clean, files: [{ path: '../x.md', sha256: 'a'.repeat(64) }] }).length > 0, 'traversal path passed');
+    assert(errorsOf(S.validatePushState, { ...clean, files: [clean.files[0], clean.files[0]] }).length > 0, 'duplicate path passed');
+    assert(errorsOf(S.validatePushState, { ...clean, files: [{ path: 'prd.md', sha256: 'zz' }] }).length > 0, 'bad digest passed');
+    assert(errorsOf(S.validatePushState, { ...clean, files: [{ path: 'prd.md', sha256: 'a'.repeat(64), page_id: 'abc' }] }).length > 0, 'non-numeric page id passed');
+    for (const h of HOSTILE) noThrow(S.validatePushState, h, 'validatePushState');
+  });
+  check('config validator: confluence settings block validated whenever present', () => {
+    const c = S.defaultConfig('p');
+    c.destination = { kind: 'confluence', asked: true, confluence: { space_key: 'DOCS', parent_page_id: '123' } };
+    assert(errorsOf(S.validateConfig, c).length === 0, 'clean confluence block rejected');
+    c.destination.confluence = { space_key: 'has space', parent_page_id: '123' };
+    assert(errorsOf(S.validateConfig, c).length > 0, 'bad space key passed');
+    c.destination.confluence = { space_key: 'DOCS', parent_page_id: 'x' };
+    assert(errorsOf(S.validateConfig, c).length > 0, 'non-numeric parent passed');
+  });
+  await checkAsync('no recorded consent: push sniffs, asks, delivers nothing, exits 1', async () => {
+    const b = await certified();
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, [], m => msgs.push(m), {}) === 1, 'pushed without consent');
+    assert(msgs.some(m => m.includes('consent is never assumed')), 'no consent line');
+    assert(msgs.some(m => m.includes('markdown-only')) && !msgs.some(m => m.includes('confluence,')), 'sniff wrong for bare env');
+    assert(!fs.existsSync(statePath(b)), 'push-state written without consent');
+    assert(configOf(b).destination.asked === false, 'consent recorded by a refusal');
+  });
+  await checkAsync('--to records the ask-once choice and markdown-only delivers a verified, replayable state', async () => {
+    const b = await certified();
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m), {}) === 0, 'push failed: ' + msgs.join(' | '));
+    const cfg = configOf(b);
+    assert(cfg.destination.kind === 'markdown-only' && cfg.destination.asked === true, 'choice not recorded');
+    const st = stateOf(b);
+    assert(errorsOf(S.validatePushState, st).length === 0, 'push-state invalid');
+    const prd = fs.readFileSync(path.join(b.dir, '.ogma/out/prd.md'), 'utf8');
+    const crypto = require('crypto');
+    assert(st.files.find(f => f.path === 'prd.md').sha256 ===
+      crypto.createHash('sha256').update(prd, 'utf8').digest('hex'), 'recorded hash is not the file hash');
+    // replay: second push, no --to needed, everything unchanged
+    const msgs2 = [];
+    assert(await P.cmdPush(b.dir, [], m => msgs2.push(m), {}) === 0, 'replay failed');
+    assert(msgs2.some(m => m.includes('unchanged')), 'replay did not report unchanged');
+  });
+  await checkAsync('unknown and unbuilt destinations refuse honestly', async () => {
+    const b = await certified();
+    const m1 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'ftp'], m => m1.push(m), {}) === 1, 'unknown kind accepted');
+    assert(m1.join(' ').includes('unknown destination'), 'no unknown-kind line');
+    const m2 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'notion'], m => m2.push(m), {}) === 1, 'unbuilt adapter accepted');
+    assert(m2.join(' ').includes('not built'), 'no not-built line');
+    assert(configOf(b).destination.asked === false, 'a refused choice was recorded');
+  });
+  await checkAsync('no certificate, a failing certificate, and a stale certificate each refuse with the fix named', async () => {
+    const b = await certified();
+    const certPath = path.join(b.dir, '.ogma/certificate.json');
+    const good = fs.readFileSync(certPath, 'utf8');
+    // no certificate
+    fs.rmSync(certPath);
+    const m1 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => m1.push(m), {}) === 1, 'shipped uncertified');
+    assert(m1.join(' ').includes('ogma gate'), 'missing-cert refusal does not name the gate');
+    // failing certificate (structurally valid: one row false, topline false)
+    const cert = JSON.parse(good);
+    cert.pass = false; cert.checks[0].pass = false;
+    fs.writeFileSync(certPath, JSON.stringify(cert, null, 2));
+    const m2 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => m2.push(m), {}) === 1, 'shipped a failing fleet');
+    assert(m2.join(' ').includes('FAILING'), 'failing-cert refusal unlabeled');
+    // stale certificate: restore, then land a commit
+    fs.writeFileSync(certPath, good);
+    fs.writeFileSync(path.join(b.dir, 'src/Api.cs'), GRAPH_FILES['src/Api.cs'] + '// drift\n');
+    gitIn(b.dir, ['add', '-A']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'drift']);
+    const m3 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => m3.push(m), {}) === 1, 'shipped a stale certificate');
+    assert(m3.join(' ').includes('ogma watch'), 'stale-cert refusal does not name watch');
+    assert(!fs.existsSync(statePath(b)), 'a refused push left state behind');
+  });
+  await checkAsync('confluence without credentials refuses; nothing leaves the machine', async () => {
+    const b = await certified();
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), {}) === 1, 'delivered without creds');
+    assert(msgs.join(' ').includes('CONFLUENCE_BASE_URL'), 'env requirement not named');
+    assert(!fs.existsSync(statePath(b)), 'state written with nothing delivered');
+  });
+  await checkAsync('confluence e2e against a local mock: create verified by full read-back, replay skips, edit updates in place', async () => {
+    const http = require('http');
+    const pages = new Map(); let nextId = 100;
+    const server = http.createServer((req, res) => {
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const u = new URL(req.url, 'http://x');
+        if (req.method === 'GET' && u.pathname === '/wiki/api/v2/spaces') return send(200, { results: [{ id: '9', key: u.searchParams.get('keys') }] });
+        const pm = /^\/wiki\/api\/v2\/pages(?:\/(\d+))?$/.exec(u.pathname);
+        if (!pm) return send(404, {});
+        if (req.method === 'POST') {
+          const p = JSON.parse(body); const id = String(nextId++);
+          pages.set(id, { id, title: p.title, status: 'current', version: { number: 1 }, body: p.body.value });
+          return send(200, { id, title: p.title });
+        }
+        const page = pages.get(pm[1]);
+        if (!page) return send(404, {});
+        if (req.method === 'GET') {
+          const out = { id: page.id, title: page.title, status: page.status, version: page.version };
+          if (u.searchParams.get('body-format') === 'storage') out.body = { storage: { value: page.body } };
+          return send(200, out);
+        }
+        if (req.method === 'PUT') {
+          const p = JSON.parse(body);
+          page.title = p.title; page.version = { number: p.version.number }; page.body = p.body.value;
+          return send(200, { id: page.id });
+        }
+        return send(405, {});
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const env = {
+      CONFLUENCE_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+      CONFLUENCE_EMAIL: 'bench@ogma.test', CONFLUENCE_API_TOKEN: 'token'
+    };
+    try {
+      const b = await certified();
+      const msgs = [];
+      assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), env) === 0,
+        'confluence push failed: ' + msgs.join(' | '));
+      const st = stateOf(b);
+      assert(st.kind === 'confluence' && st.files.every(f => /^\d+$/.test(f.page_id)), 'page ids not recorded');
+      const prdPage = [...pages.values()].find(p => p.title.endsWith('· prd'));
+      assert(prdPage && prdPage.body.includes('<h1>') && !prdPage.body.includes('fact:'), 'delivered body wrong or annotated');
+      assert(!JSON.stringify(st).includes('token'), 'secret reached push-state');
+      // replay: nothing changed -> every page skipped, versions untouched
+      const versions1 = [...pages.values()].map(p => p.version.number);
+      const msgs2 = [];
+      assert(await P.cmdPush(b.dir, [], m => msgs2.push(m), env) === 0, 'replay failed');
+      assert([...pages.values()].map(p => p.version.number).join() === versions1.join(), 'replay bumped versions with identical content');
+      assert(msgs2.every(m => !m.includes('created')), 'replay re-created pages');
+      // edit one document -> exactly that page updates, version 2, same id
+      const qPath = path.join(b.dir, '.ogma/out/questions.md');
+      fs.writeFileSync(qPath, fs.readFileSync(qPath, 'utf8') + '\nAll clear.\n');
+      const before = new Map(st.files.map(f => [f.path, f.page_id]));
+      const msgs3 = [];
+      assert(await P.cmdPush(b.dir, [], m => msgs3.push(m), env) === 0, 'update push failed: ' + msgs3.join(' | '));
+      const st3 = stateOf(b);
+      assert(st3.files.find(f => f.path === 'questions.md').page_id === before.get('questions.md'), 'update changed the page id');
+      const qPage = pages.get(before.get('questions.md'));
+      assert(qPage.version.number === 2 && qPage.body.includes('All clear.'), 'update not applied in place');
+      assert([...st3.files].filter(f => f.path !== 'questions.md').every(f => pages.get(f.page_id).version.number === 1), 'unrelated pages re-written');
+    } finally {
+      server.close();
+    }
+  });
+  await checkAsync('a lying destination is caught by fetch-back: 200 on write, wrong content on read — push fails, no state recorded', async () => {
+    const http = require('http');
+    // Accepts every write, then serves back an empty page: the API said yes,
+    // the content is not there. Exactly the failure an API-200-is-proof
+    // adapter would certify.
+    const server = http.createServer((req, res) => {
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const u = new URL(req.url, 'http://x');
+        if (req.method === 'GET' && u.pathname === '/wiki/api/v2/spaces') return send(200, { results: [{ id: '9' }] });
+        if (req.method === 'POST') return send(200, { id: '500', title: JSON.parse(body).title });
+        return send(200, { id: '500', title: 'wrong title', status: 'current', version: { number: 1 }, body: { storage: { value: '' } } });
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const env = {
+      CONFLUENCE_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+      CONFLUENCE_EMAIL: 'bench@ogma.test', CONFLUENCE_API_TOKEN: 'token'
+    };
+    try {
+      const b = await certified();
+      const msgs = [];
+      assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), env) === 1,
+        'a write that read back wrong was reported as delivered');
+      assert(msgs.join(' ').includes('did not verify') || msgs.join(' ').includes('verify'), 'failure not named as a verification failure');
+      assert(!fs.existsSync(statePath(b)), 'push-state recorded an unverified delivery');
+    } finally {
+      server.close();
+    }
+  });
+}
+
 // The graph checks await the WASM engine, so the bench tail (graph -> CLI ->
 // housekeeping -> summary) runs inside one async main; a stray rejection is a
 // bench failure, never a silent green.
@@ -1774,6 +2121,8 @@ await ingestChecks();
 await renderChecks();
 await gateChecks();
 await mapChecks();
+await watchChecks();
+await pushChecks();
 
 // ---- CLI process-level behavior -------------------------------------------
 
@@ -1790,10 +2139,14 @@ check('help shows terrain as built — no "not built yet" tag on its line', () =
   const line = r.stdout.split('\n').find(l => l.trim().startsWith('terrain'));
   assert(line && !line.includes('not built yet'), `terrain line: ${line}`);
 });
-check('unbuilt command exits 1 and names its batch', () => {
-  const r = run(['watch']);
+// Every power now has a handler; the honest-stub refusal in bin/ still guards
+// any FUTURE power added without one. What replaces the old unbuilt-command
+// check: the built watch refusing to run without its prerequisites.
+check('watch in a bare directory exits 1 and points at ingest', () => {
+  const dir = tmpdir();
+  const r = spawnSync(process.execPath, [BIN, 'watch'], { encoding: 'utf8', cwd: dir });
   assert(r.status === 1, `exit ${r.status}`);
-  assert(r.stderr.includes('batch 7'), 'no batch number');
+  assert((r.stdout + r.stderr).includes('ogma ingest'), 'no pointer at ingest');
 });
 check('unknown command exits 1, help goes to stderr not stdout', () => {
   const r = run(['bogus']);

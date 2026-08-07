@@ -49,6 +49,8 @@ lib/ingest.js      The read's bookend — schemas, facts<->terrain both ways, re
 lib/render.js      The Voices — deterministic renderers (prd/tech/guides/questions) + the fact-ID annotation syntax
 lib/gate.js        The Gate — nine checks + certificate emission (leaklint, readability, coverage, binding, annotation resolution)
 lib/map.js         The Map — map.md + self-contained dashboard (map.html, both themes) + canvas export
+lib/watch.js       Watch — receipt invalidation: diff each fact's verified commit vs HEAD, mark only touched facts stale, advance the manifest
+lib/push.js        Push — ask-once consent, certified-fleet-only delivery, adapters (markdown-only, Confluence w/ fetch-back verify), push-state record
 docs/ogham-schema.md  The data model — update it in the same commit as any schema change
 skill/SKILL.md     The agent-facing skill (junctioned into the user's skills dir)
 benchmarks/run.js  Schema + hostile-shape + init + CLI bench (npm test); gate fixtures join in Batch 5

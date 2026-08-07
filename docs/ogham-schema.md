@@ -30,6 +30,7 @@ All paths everywhere in the Ogham are **repo-relative POSIX paths from `manifest
     ledger.json        # open questions: ambiguity never silently resolved
   out/                 # rendered artifacts (created by renderers per enabled audience)
   certificate.json     # latest gate result
+  push-state.json      # replayable delivery record (see push-state.json section below)
 ```
 
 ## manifest.json
@@ -308,6 +309,51 @@ Check 8 scores narrative prose with **Flesch-Kincaid grade level, computed per r
 ```
 
 `version` is the **config** schema version (`CONFIG_VERSION`), deliberately independent of `ogham_version`. `destination.kind` is `null` until the ask-once flow runs, then one of the allowlisted kinds (`markdown-only`, `confluence`, `notion`, `jira`). OGMA always keeps the local markdown fleet regardless of destination. Deep validation (audience booleans, kind allowlist, grade bounds) is enforced — users hand-edit this file.
+
+When `kind` is `confluence`, `destination` additionally carries the non-secret targeting settings, recorded by the ask-once flow (`ogma push --to confluence --space <KEY> --parent <PAGE-ID>`) and validated whenever present:
+
+```json
+"destination": {
+  "kind": "confluence", "asked": true,
+  "confluence": { "space_key": "DOCS", "parent_page_id": "123456" }
+}
+```
+
+Credentials are **never** config: the adapter reads `CONFLUENCE_BASE_URL` (an `https://` origin), `CONFLUENCE_EMAIL`, and `CONFLUENCE_API_TOKEN` from the environment at push time, and none of the three is ever written to disk or echoed to output.
+
+## watch — surgical currency
+
+`ogma watch` (`lib/watch.js`) is the deterministic half of staying current; the re-reading it triggers is the skill layer's work. Mechanism, pinned (this prose and that file change together):
+
+1. Requires a manifest (a completed ingest). If `cutoff_commit` already equals HEAD, there is nothing to do.
+2. For every fact that is not already `stale`: diff the fact's `verified_at_commit` against HEAD (`git diff --name-only --no-renames`, then `-U0` per touched file). A fact goes **stale** when any diff hunk's **old-side** interval overlaps any of its receipts' widened ranges `[line − drift, end_line + drift]` — fact receipts and path-hop receipts both count. A pure insertion after old line *a* counts as touching when *a* sits in `[lo − 1, hi]`: over-invalidating costs a re-read, under-invalidating certifies a stale fact.
+3. **Cannot-prove-currency means stale, never skip-and-pass:** a fact whose `verified_at_commit` git cannot diff (rebased away, shallow clone) is marked stale with that reason. A fact with **no** `verified_at_commit` (legal on non-LIVE facts) is not watched at all — ingest and the gate verify its receipts **at HEAD** on every run, so moved code surfaces there deterministically; watch never owned those.
+4. Watch writes exactly one field per invalidated fact — `status` — and never renumbers or touches anything else. Then it advances `manifest.cutoff_commit` to HEAD: the pointer question and the per-fact currency question are answered by different fields, so the pointer advances even when facts went stale.
+5. Ledger-question receipts are not watched; the gate re-verifies them at HEAD on every run.
+
+After watch: re-read each stale fact at HEAD per the read protocol (re-author, re-witness, set `verified_at_commit` + `status: "fresh"`), then `ogma ingest`, re-render, `ogma gate`. Renders produced before a watch may still carry since-staled facts; re-rendering before the gate is part of the loop, not optional polish.
+
+## push-state.json — the delivery record
+
+`ogma push` (`lib/push.js`) delivers the local fleet to the destination the ask-once flow recorded. The rules:
+
+- **Consent is recorded by the tool, never adopted.** `init` refuses a repo-supplied destination; with no recorded choice, push sniffs the environment, prints how to choose, and delivers nothing (exit 1). `--to <kind>` records the choice (validated against the kind allowlist; kinds without a built adapter refuse honestly).
+- **Only a certified fleet ships.** Push refuses without `certificate.json`, on a failing certificate, or when the certificate's commit is not HEAD — the fix (`ogma gate`, or `ogma watch` then the refresh loop) is named in the refusal.
+- **An outward write is unproven until read back.** The Confluence adapter (REST v2, env-credentialed) verifies every update by re-fetching the page (version advanced, status `current`, title intact) and every **create** by re-fetching the full body and requiring every heading present — an API 200 alone is never proof of content.
+- **Replayable:** the `path → page_id` mapping persists, so a re-push updates the same pages; documents whose sha256 is unchanged since the last verified delivery are skipped, not re-written.
+- Fact-ID annotations are stripped from delivered bodies (`stripAnnotations` — the same single implementation the gate uses); the sha256 recorded is of the canonical local markdown, which remains the source of truth.
+
+```json
+{
+  "push_state_version": 1,
+  "kind": "confluence",
+  "commit": "a1b2c3d",
+  "delivered_at": "2026-08-07T12:00:00Z",
+  "files": [ { "path": "prd.md", "sha256": "<hex64>", "page_id": "123457" } ]
+}
+```
+
+Validated by `validatePushState`: allowlisted non-null kind, hex commit, ISO instant, safe `out/` paths (unique), 64-hex digests, numeric `page_id` when present. Written only after every delivery in it verified.
 
 ## Invariants
 

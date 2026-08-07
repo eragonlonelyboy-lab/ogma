@@ -13,6 +13,8 @@ const { cmdIngest } = require('../lib/ingest');
 const { cmdPrd, cmdExplain, cmdGuides, cmdQuestions } = require('../lib/render');
 const { cmdGate } = require('../lib/gate');
 const { cmdMap } = require('../lib/map');
+const { cmdWatch } = require('../lib/watch');
+const { cmdPush } = require('../lib/push');
 
 const VERSION = require('../package.json').version;
 
@@ -29,8 +31,9 @@ const POWERS = [
   { cmd: 'prd',       batch: 4, handler: cmdPrd, desc: 'Render the feature-first PRD for business readers' },
   { cmd: 'guides',    batch: 4, handler: cmdGuides, desc: 'Render click-by-click user guides per surface' },
   { cmd: 'questions', batch: 4, handler: cmdQuestions, desc: 'Render the open-questions ledger' },
-  { cmd: 'watch',     batch: 7, desc: 'Diff new commits, invalidate receipts, refresh only stale facts' },
-  { cmd: 'push',      batch: 7, desc: 'Deliver rendered artifacts to the configured destination' },
+  { cmd: 'watch',     batch: 7, handler: cmdWatch, desc: 'Diff new commits against the Ogham, mark only touched facts stale, advance the manifest' },
+  { cmd: 'push',      batch: 7, handler: (cwd, rest) => cmdPush(cwd, rest), takesArgs: true,
+    desc: 'Deliver the certified fleet to the chosen destination (--to <kind> records the ask-once choice)' },
   { cmd: 'gate',      batch: 5, handler: cmdGate, desc: 'Run the nine checks and emit the certificate' },
   { cmd: 'version',   batch: 0, handler: () => { console.log(VERSION); return 0; }, desc: 'Print the version' }
 ];
@@ -64,9 +67,9 @@ function main(argv) {
     printHelp(console.error);
     return 1;
   }
-  if (rest.length > 0) {
+  if (rest.length > 0 && !power.takesArgs) {
     console.error(`ogma ${cmd}: unrecognized arguments: ${rest.join(' ')}`);
-    console.error('No command takes arguments yet; refusing rather than silently ignoring them.');
+    console.error('This command takes no arguments; refusing rather than silently ignoring them.');
     return 1;
   }
   if (!power.handler) {
@@ -74,7 +77,8 @@ function main(argv) {
     console.error('OGMA ships complete; unbuilt powers refuse to pretend.');
     return 1;
   }
-  return power.handler(process.cwd());
+  // Handlers keep their (cwd, log) signature; only arg-taking powers get rest.
+  return power.takesArgs ? power.handler(process.cwd(), rest) : power.handler(process.cwd());
 }
 
 // exitCode, not process.exit: exit() discards queued stdout on pipes.
