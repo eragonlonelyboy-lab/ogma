@@ -34,7 +34,7 @@ const POWERS = [
   { cmd: 'watch',     batch: 7, handler: cmdWatch, desc: 'Diff new commits against the Ogham, mark only touched facts stale, advance the manifest' },
   { cmd: 'push',      batch: 7, handler: (cwd, rest) => cmdPush(cwd, rest), takesArgs: true,
     desc: 'Deliver the certified fleet to the chosen destination (--to <kind> records the ask-once choice)' },
-  { cmd: 'gate',      batch: 5, handler: cmdGate, desc: 'Run the nine checks and emit the certificate' },
+  { cmd: 'gate',      batch: 5, handler: cmdGate, desc: 'Run the ten checks and emit the certificate' },
   { cmd: 'version',   batch: 0, handler: () => { console.log(VERSION); return 0; }, desc: 'Print the version' }
 ];
 

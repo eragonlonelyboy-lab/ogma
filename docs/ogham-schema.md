@@ -46,7 +46,7 @@ All paths everywhere in the Ogham are **repo-relative POSIX paths from `manifest
 }
 ```
 
-`cutoff_commit` is **the commit the Ogham is current as of** — not a floor. It must equal repo HEAD for the gate to certify (see `head_commit` under certificate.json).
+`cutoff_commit` is **the commit the Ogham is current as of** — not a floor. It must equal repo HEAD for the gate to certify (see `commit` and the binding rule under certificate.json).
 
 This was specified as a floor and separately required to equal HEAD, which cannot both hold once a single commit lands: keep the floor and the certificate becomes permanently unobtainable, advance it to HEAD and the floor is decorative. The resolution keeps the field's binding job and moves per-fact currency onto the facts, where `watch` already works:
 
