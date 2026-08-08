@@ -1,6 +1,6 @@
 # fixture-ms — what the product does
 
-_Current as of commit 4ff48cec099f. Every claim in this document traces to verified code; open questions live in questions.md._
+_Current as of commit 4ff48cec099f. Each rule below was checked against the code it names. The short summaries are written from those rules and are not checked on their own. Open points are listed in questions.md._
 
 ## Duration conversion
 

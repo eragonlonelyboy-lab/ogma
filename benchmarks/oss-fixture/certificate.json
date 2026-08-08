@@ -2,7 +2,7 @@
   "certificate_version": 1,
   "project": "fixture-ms",
   "commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
-  "generated_at": "2026-08-08T03:50:33Z",
+  "generated_at": "2026-08-08T04:34:24Z",
   "pass": true,
   "checks": [
     {
@@ -43,7 +43,7 @@
     {
       "check": "readability",
       "pass": true,
-      "detail": "prd.md: grade 7.5"
+      "detail": "prd.md: grade 7.0"
     },
     {
       "check": "integrity",
@@ -66,7 +66,7 @@
   "documents": [
     {
       "path": "prd.md",
-      "sha256": "cf380d745e5ce8466606d26d2b112f1d9e6144a89fabf5d69fdf84717a1f7408"
+      "sha256": "68e506c7294659098edc8441df53e8b35cc7707a0653f3c431de01ee2d4081c3"
     },
     {
       "path": "questions.md",

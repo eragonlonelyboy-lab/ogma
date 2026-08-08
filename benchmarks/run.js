@@ -1797,10 +1797,12 @@ async function watchChecks() {
   const factsOf = (b) => JSON.parse(fs.readFileSync(b.factsPath, 'utf8')).facts;
   const manifestOf = (b) => JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/ogham/manifest.json'), 'utf8'));
 
-  check('hunk parsing: old-side intervals exact, insertions carry count 0', () => {
+  check('hunk parsing: old-side intervals exact, insertions carry count 0, every hunk carries its line delta', () => {
     const t = 'diff --git a/x b/x\n@@ -4,3 +4,2 @@ ctx\n-a\n@@ -9 +8 @@\n-b\n@@ -12,0 +12,5 @@\n+c\n';
+    // delta = new-side count - old-side count. Without it a hunk ABOVE a cited
+    // range cannot be told from one that leaves the numbering alone.
     assert(JSON.stringify(WATCH.parseHunkIntervals(t)) ===
-      JSON.stringify([{ start: 4, count: 3 }, { start: 9, count: 1 }, { start: 12, count: 0 }]),
+      JSON.stringify([{ start: 4, count: 3, delta: -1 }, { start: 9, count: 1, delta: 0 }, { start: 12, count: 0, delta: 5 }]),
       'intervals: ' + JSON.stringify(WATCH.parseHunkIntervals(t)));
   });
   check('touch rule: overlap on both boundaries, insertion boundary conservative', () => {
@@ -1813,6 +1815,13 @@ async function watchChecks() {
     assert(touch([{ start: 9, count: 0 }], 10, 12), 'insertion at lo-1 (lands at lo) missed');
     assert(touch([{ start: 12, count: 0 }], 10, 12), 'insertion at hi missed');
     assert(!touch([{ start: 13, count: 0 }], 10, 12), 'insertion after hi counted');
+    // SHIFT: a hunk entirely above the range never overlaps it, but any net
+    // line-count change moves every cited line below it. Missing this left the
+    // gate certifying PASS over a receipt pointing at unrelated code.
+    assert(touch([{ start: 1, count: 0, delta: 100 }], 39, 51), 'insertion far above (shift) missed');
+    assert(touch([{ start: 11, count: 10, delta: -10 }], 39, 51), 'deletion above (shift) missed');
+    assert(!touch([{ start: 11, count: 10, delta: 0 }], 39, 51), 'equal-size edit above counted — numbering is intact');
+    assert(!touch([{ start: 900, count: 2, delta: 3 }], 39, 51), 'edit BELOW the range counted — it shifts nothing above it');
   });
   await checkAsync('an edit inside a cited window marks exactly the citing facts stale', async () => {
     const b = await ingested();
@@ -2355,6 +2364,7 @@ await debtChecks();
 await pushChecks();
 await batch9Checks();
 await batch10Checks();
+await batch11Checks();
 
 // ---- batch 9: the ship-panel findings, each pinned -------------------------
 
@@ -2435,10 +2445,12 @@ async function batch9Checks() {
     assert(msgs.join(' ').includes('targeting block'), 'refusal does not name the targeting block');
   });
   await checkAsync('SHIP-03: push refuses when the repo itself ships .ogma/config.json', async () => {
-    const b = await certified9({ '.ogma/config.json': JSON.stringify(S.defaultConfig('x'), null, 2) + '\n' });
+    const b = await certified9();
+    gitIn(b.dir, ['add', '-f', '.ogma/config.json']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'ship a config']);
     const msgs = [];
     assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m), {}) === 1, 'push trusted a repo-tracked config');
-    assert(msgs.join(' ').includes('tracked in this repository'), 'refusal does not name the tracked file');
+    assert(msgs.join(' ').includes('tracked by this repository'), 'refusal does not name the tracked file');
     assert(!fs.existsSync(path.join(b.dir, '.ogma/push-state.json')), 'a refused push left state behind');
   });
   await checkAsync('SHIP-04: a repo-planted symlink under .ogma is refused by every write path (shared guarded write)', async () => {
@@ -2618,35 +2630,74 @@ async function batch10Checks() {
       'expected all five escapes: ' + out);
   });
 
-  // F5 — a review asked whether the provenance gate should refuse EVERY
-  // tracked .ogma/ file, since a hostile repo could ship its own
-  // certificate.json. It cannot authorize a push, and this pins why: the
-  // certificate must name the commit that CONTAINS it, and committing the
-  // file changes that commit's hash. The property is load-bearing (it is what
-  // lets the gate stay narrow enough not to break `git add -A`), so it is
-  // asserted here rather than left incidental.
-  await checkAsync('F5: a repo-shipped certificate can never authorize a push — it cannot name the commit that contains it', async () => {
+  // F5 (SUPERSEDED by B11-SEC below). Batch 10 asked whether the provenance
+  // gate should refuse EVERY tracked .ogma/ file and answered no, reasoning
+  // that a committed certificate cannot lie — it would have to name the
+  // commit that contains it. That fixpoint is real, and still asserted here,
+  // but it was wrongly generalised to the whole directory: facts/ has no
+  // fixpoint, and a committed fact file is the payload that actually reaches
+  // a reader. The scope question is now settled by B11-SEC; this check keeps
+  // the HEAD-binding property itself pinned, since the rest of the design
+  // leans on it.
+  await checkAsync('F5: a certificate can never authorize a push unless it names the commit that contains it', async () => {
     const b = await certified10();
-    gitIn(b.dir, ['add', '-f', '.ogma/certificate.json']);
-    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'ship a certificate']);
+    const cert = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/certificate.json'), 'utf8'));
+    // Move HEAD without touching any cited code: the certificate now names a
+    // commit that is no longer HEAD, which is exactly the shape a repo-shipped
+    // certificate is stuck in permanently.
+    fs.writeFileSync(path.join(b.dir, 'NOTES.md'), 'unrelated\n');
+    gitIn(b.dir, ['add', '-A']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'unrelated commit']);
     const msgs = [];
     assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m)) === 1,
-      'a committed certificate was accepted as authorization');
-    const said = msgs.join(' ');
-    assert(/certificate is for .* but HEAD is/.test(said),
-      'the refusal is not the HEAD-binding one: ' + said.slice(0, 300));
-    // And the operator's own locally regenerated certificate still ships,
-    // tracked path or not — the gate must not punish an ordinary `git add -A`.
-    assert(await G10.cmdGraph(b.dir, quiet) === 0, 'b10 F5: re-graph failed');
-    const im = [];
-    assert(cmdIngest(b.dir, m => im.push(m)) === 0, 'b10 F5: re-ingest failed: ' + im.join(' | '));
-    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
-      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'b10 F5: re-render failed');
-    assert(M.cmdMap(b.dir, quiet) === 0, 'b10 F5: re-map failed');
-    assert(GATE.cmdGate(b.dir, quiet) === 0, 'b10 F5: re-gate failed');
-    const m2 = [];
-    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => m2.push(m)) === 0,
-      'a locally regenerated certificate was refused merely because its path is tracked: ' + m2.join(' | '));
+      'a certificate that does not name HEAD was accepted as authorization');
+    assert(/certificate is for .* but HEAD is/.test(msgs.join(' ')),
+      'the refusal is not the HEAD-binding one: ' + msgs.join(' | ').slice(0, 300));
+    assert(cert.commit && cert.commit.length === 40, 'certificate did not record a full commit id');
+  });
+
+  // B11-SEC — the round-2 blocking finding, reproduced as the panel ran it:
+  // a repository that COMMITS its own Ogham gets those facts adopted as
+  // authored, certified, and delivered under the operator's credentials. The
+  // witness input_hash is an unkeyed digest of statement + cited code, all of
+  // which a repo author holds, so a CONFIRMED ruling forges offline; the one
+  // thing the attacker cannot supply — a manifest naming HEAD — is produced by
+  // the victim's own ingest run. Every reader must refuse, not just push.
+  await checkAsync('B11-SEC: a repo-committed Ogham is refused by ingest, gate AND push — never adopted as authored', async () => {
+    const b = await certified10();
+    const factsDir = path.join(b.dir, '.ogma/ogham/facts');
+    const factFile = fs.readdirSync(factsDir).filter(f => f.endsWith('.json'))[0];
+    assert(factFile, 'fixture has no facts file to commit');
+    gitIn(b.dir, ['add', '-f', `.ogma/ogham/facts/${factFile}`]);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'ship an Ogham']);
+
+    for (const [name, run] of [
+      ['ingest', () => cmdIngest(b.dir, m => msgs.push(m))],
+      ['gate', () => GATE.cmdGate(b.dir, m => msgs.push(m))],
+      ['push', async () => await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m))]
+    ]) {
+      var msgs = [];
+      assert(await run() === 1, `${name} read a repo-committed Ogham instead of refusing it`);
+      const said = msgs.join(' ');
+      assert(said.includes('tracked by this repository'),
+        `${name}'s refusal does not name the provenance problem: ` + said.slice(0, 200));
+      assert(said.includes('git rm --cached'), `${name}'s refusal does not tell the operator how to fix it`);
+    }
+    assert(!fs.existsSync(path.join(b.dir, '.ogma/push-state.json')), 'a refused push left delivery state behind');
+  });
+
+  // The other half of the same fix: the ordinary workflow must not produce
+  // tracked state in the first place, or the refusal above becomes a tax on
+  // every honest user rather than a signal.
+  check('B11-SEC: init writes a self-ignoring .ogma/, so `git add -A` cannot track OGMA state', () => {
+    const dir = makeFixtureRepo({ 'a.js': 'const x = 1;\n' });
+    assert(cmdInit(dir, quiet) === 0, 'init failed');
+    const ignore = path.join(dir, '.ogma/.gitignore');
+    assert(fs.existsSync(ignore), 'init did not write .ogma/.gitignore');
+    assert(/^\*$/m.test(fs.readFileSync(ignore, 'utf8')), '.ogma/.gitignore does not ignore everything');
+    gitIn(dir, ['add', '-A']);
+    const staged = gitIn(dir, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean);
+    assert(!staged.some(p => p.startsWith('.ogma/')), 'git add -A staged OGMA state: ' + staged.join(', '));
   });
 
   // F6 — an excerpt whose end_line ran past EOF was labelled with the
@@ -2732,6 +2783,151 @@ async function batch10Checks() {
       assert(!/spawnSync\('git',\s*\[\s*'-C',\s*cwd,\s*'rev-parse'/.test(src),
         `lib/${f}.js still hand-rolls the rev-parse idiom`);
     }
+  });
+}
+
+// ---- batch 11: the round-2 ship-panel findings, each pinned ----------------
+
+async function batch11Checks() {
+  console.log('batch 11 (ship-panel round 2):');
+  const GATE = require('../lib/gate');
+  const R = require('../lib/render');
+  const M = require('../lib/map');
+  const U = require('../lib/util');
+  const V11 = require('../lib/verify');
+  const W11 = require('../lib/witness');
+
+  // R2-03 — `git cat-file -s` succeeds on a TREE and `git show` returns its
+  // listing, so a receipt citing a directory "verified" against text that
+  // happened to contain the symbol. A directory is not code.
+  check('R2-03: a receipt citing a DIRECTORY does not verify — only blobs are code', () => {
+    const dir = makeFixtureRepo({ 'src/pay.js': 'function pay() {}\n', 'src/other.js': 'const x = 1;\n' });
+    const head = gitIn(dir, ['rev-parse', 'HEAD']).trim();
+    const read = V11.makeGitReader(dir, head);
+    assert(read('src') === null, 'a directory was returned as file content');
+    assert(typeof read('src/pay.js') === 'string', 'a real file stopped being readable');
+    const r = V11.verifyReceipt({ file: 'src', line: 1, symbol: 'pay.js' }, read);
+    assert(r.ok === false && r.reason === 'missing-file', 'a directory citation verified: ' + JSON.stringify(r));
+    // The witness must not be handed a directory listing as "the cited code".
+    const d = W11.deriveExcerpts([{ file: 'src', line: 1 }], read);
+    assert(d.error, 'deriveExcerpts produced excerpts from a directory');
+  });
+
+  // R2-04 — narrativeText dropped every heading line before the lint ran, and
+  // module/feature names are RENDERED AS HEADINGS and repo-derived.
+  check('R2-04: banned vocabulary in a heading is caught; readability still ignores headings', () => {
+    assert(GATE.leakHits('## The API surface\n\nEverything is fine here.', []).includes('api'),
+      'a banned term in a heading escaped the leak lint');
+    assert(GATE.leakHits('## Duration conversion\n\nAll good.', []).length === 0, 'a clean heading was flagged');
+    // Readability must NOT read headings: a long label is not a sentence.
+    const readabilityText = GATE.narrativeText('## Antidisestablishmentarianism\n\nThe cat sat.');
+    assert(!readabilityText.includes('Antidisestablish'), 'readability text kept a heading and will skew the grade');
+  });
+
+  // R2-08 — the PRD preamble promised every claim traced to verified code
+  // while feature narration carries no receipt and no witness. It must state
+  // only what is true, and must not fail its own readability gate.
+  check('R2-08: the PRD preamble claims only what is checked, and passes its own grade', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'render.js'), 'utf8');
+    assert(!/Every claim in this document traces to verified code/.test(src),
+      'the PRD still promises that every claim traces to verified code');
+    const m = /_Current as of commit \$\{[^}]*\}\. ([^`]*?)_`/.exec(src);
+    assert(m, 'could not find the rendered preamble in render.js');
+    const preamble = m[1];
+    assert(/not checked on their own/.test(preamble),
+      'the preamble does not state that the summaries are unchecked: ' + preamble);
+    const grade = GATE.fkGrade(GATE.narrativeText('_Current as of commit abc123456789. ' + preamble + '_'));
+    assert(grade <= S.defaultConfig('t').readability_max_grade,
+      `OGMA's own preamble fails its own readability gate: grade ${grade.toFixed(2)}`);
+  });
+
+  // R2-09 — docs said an out/ file outside the contract fails integrity; the
+  // check only parsed annotations and never compared the two sets.
+  await checkAsync('R2-09: a document in out/ that the contract does not name fails integrity', async () => {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'fixture ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'fixture render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'fixture map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'clean fixture did not certify');
+    fs.writeFileSync(path.join(b.dir, '.ogma/out/leftover.md'), '# left over\n');
+    const msgs = [];
+    assert(GATE.cmdGate(b.dir, m => msgs.push(m)) === 1, 'an unlisted out/ document still certified');
+    const cert = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/certificate.json'), 'utf8'));
+    const integrity = cert.checks.find(c => c.check === 'integrity');
+    assert(integrity && integrity.pass === false && /leftover\.md/.test(integrity.detail),
+      'integrity did not name the unlisted document: ' + JSON.stringify(integrity));
+  });
+
+  // R2-10 — leaklint and readability hardcoded 'prd.md' instead of deriving
+  // the measured population from the ONE document contract.
+  check('R2-10: the measured business documents come from the contract, so a disabled audience is not linted', () => {
+    const cfg = { ...S.defaultConfig('t'), audiences: { prd: false, tech: true, guides: true } };
+    const terrain = {
+      surfaces: [{ id: 'web', kind: 'frontend', root: '.', entry_points: [], modules: [] }],
+      modules: [{ id: 'm1', name: 'M One', surface_ids: ['web'], roots: ['src'], summary: 's' }],
+      languages: {}
+    };
+    const docs = S.outDocuments(cfg, terrain);
+    assert(!docs.includes('prd.md'), 'outDocuments listed prd.md while the audience is disabled');
+    const business = docs.filter(r => r === 'prd.md' || r.startsWith('guides/'));
+    assert(JSON.stringify(business) === JSON.stringify(['guides/web.md']),
+      'the measured population is not contract-derived: ' + JSON.stringify(business));
+    const gateSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'gate.js'), 'utf8');
+    assert(!/const docs = \['prd\.md'/.test(gateSrc), 'gate.js still hardcodes the business document list');
+  });
+
+  // R2-11 — writes refused symlinks; reads followed them. A planted junction
+  // sourced the Ogham from outside the repo, and the gate's walk crossed the
+  // filesystem (a self-referential link aborted with a raw ELOOP).
+  check('R2-11: OGMA state listings refuse a linked directory and never follow linked entries', () => {
+    const dir = tmpdir();
+    const real = path.join(dir, 'real');
+    const outside = tmpdir();
+    fs.mkdirSync(real);
+    fs.writeFileSync(path.join(real, 'a.json'), '{}');
+    fs.writeFileSync(path.join(outside, 'planted.json'), '{}');
+    assert(JSON.stringify(U.safeListFiles(real)) === JSON.stringify(['a.json']), 'real listing broke');
+    const linked = path.join(dir, 'linked');
+    try { fs.symlinkSync(outside, linked, 'junction'); } catch { return; }   // no privilege: skip
+    let refused = false;
+    try { U.safeListFiles(linked); } catch (e) { refused = /symlink/.test(e.message); }
+    assert(refused, 'a linked state directory was listed instead of refused');
+    // A link INSIDE a walked tree is skipped, never followed.
+    const walkRoot = path.join(dir, 'walk');
+    fs.mkdirSync(walkRoot);
+    fs.writeFileSync(path.join(walkRoot, 'own.md'), '# own\n');
+    fs.writeFileSync(path.join(outside, 'foreign.md'), '# foreign\n');
+    fs.symlinkSync(outside, path.join(walkRoot, 'escape'), 'junction');
+    const walked = U.safeWalkFiles(walkRoot, '.md');
+    assert(JSON.stringify(walked) === JSON.stringify(['own.md']),
+      'the walk followed a link out of its tree: ' + JSON.stringify(walked));
+  });
+
+  // R2-12 — one implementation per contract. sha256 spans the gate/push trust
+  // boundary; an encoding change in a private copy silently turns every push
+  // into "changed after the gate ran".
+  check('R2-12: sha256, MAX_REPORTED, factIndex and narratable each have exactly one implementation', () => {
+    assert(typeof U.sha256 === 'function' && U.sha256('x').length === 64, 'util does not own sha256');
+    assert(U.MAX_REPORTED === 50, 'util does not own MAX_REPORTED');
+    assert(typeof R.factIndex === 'function' && typeof R.narratable === 'function',
+      'render does not export the helpers map.js needs');
+    for (const f of ['gate', 'push']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'lib', `${f}.js`), 'utf8');
+      assert(!/createHash\('sha256'\)/.test(src), `lib/${f}.js still hand-rolls sha256`);
+    }
+    for (const f of ['ingest', 'watch']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'lib', `${f}.js`), 'utf8');
+      assert(!/^const MAX_REPORTED = /m.test(src), `lib/${f}.js still declares its own MAX_REPORTED`);
+    }
+    const mapSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'map.js'), 'utf8');
+    assert(!/new Map\(facts\.map\(/.test(mapSrc), 'map.js still reimplements factIndex');
+    assert(/narratable\(feat, byId, 'guides'\)/.test(mapSrc),
+      'map.js no longer computes a guides answer at all');
+    // The CONSUMER is the half that actually decides what a reader sees: it
+    // must read the flag for the audience being rendered, not the prd one.
+    assert(/!f\.narratable\[audience\]/.test(mapSrc),
+      'map.js answers the guides view with the prd narratable flag');
   });
 }
 

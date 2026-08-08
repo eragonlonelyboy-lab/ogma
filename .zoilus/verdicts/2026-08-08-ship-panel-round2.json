@@ -1,0 +1,125 @@
+{
+  "date": "2026-08-08",
+  "artifact": "ogma @ 99ea9d8 (after Batch 10)",
+  "panel": "ship gate round 2 (CHI-R140 single blind panel on finished product)",
+  "verdict": "FAIL",
+  "confidence": 1.0,
+  "bar": 8,
+  "blocking_total": 17,
+  "rule": "no averaging; one lens below bar sinks the verdict",
+  "method_note": "This round the critics were explicitly told to RUN the code and build hostile fixtures. Round 1 critics mostly read. The harsher result is a better-instrumented panel, not a regression: four of these findings reproduce on the same code round 1 rated 8.",
+  "lenses": [
+    { "lens": "correctness", "score": 3, "pass": false, "blocking": 3 },
+    { "lens": "security",    "score": 5, "pass": false, "blocking": 1 },
+    { "lens": "edge-cases",  "score": 5, "pass": false, "blocking": 3 },
+    { "lens": "spec",        "score": 6, "pass": false, "blocking": 6 },
+    { "lens": "code",        "score": 7, "pass": false, "blocking": 4 }
+  ],
+  "blocking_findings": [
+    {
+      "id": "R2-01",
+      "lens": "correctness",
+      "severity": "worst",
+      "summary": "watch/hunksTouch modelled overlap but never line SHIFT. An insertion or deletion ABOVE a cited range never invalidated it, so a receipt pointed at unrelated code while the gate certified PASS 10/10. Breaks the central 'surgical refresh' promise in the unsafe direction.",
+      "verified_by_maker": "hunksTouch([{start:10,count:0}],39,51) === false and ([{start:11,count:10}],39,51) === false, reproduced directly.",
+      "status": "FIXED in Batch 11 (delta-aware shift rule + 4 pinned boundary assertions)"
+    },
+    {
+      "id": "R2-02",
+      "lens": "security",
+      "summary": "A repo that commits .ogma/ogham/facts/*.json has its attacker-authored facts adopted as authored: the victim's own ingest supplies the manifest binding to HEAD, gate returns PASS 10/10, push publishes the lie under the operator's token. witnessInputHash is an unkeyed sha256 so CONFIRMED rulings forge offline. Only config.json/push-state.json were provenance-checked.",
+      "verified_by_maker": "witnessInputHash is plain crypto sha256 (schema.js:367); the only ls-files check was push.js covering two files; init wrote no .gitignore.",
+      "status": "IN PROGRESS Batch 11 (init writes self-ignoring .ogma/.gitignore; trackedOgmaState/refuseTrackedOgma enforced in ingest + gate + push)",
+      "maker_note": "Directly overturns the Batch 10 F5 decision. The certificate fixpoint reasoning was correct but was wrongly generalised to all of .ogma/; facts/ has no fixpoint."
+    },
+    {
+      "id": "R2-03",
+      "lens": "correctness",
+      "summary": "A receipt citing a DIRECTORY verifies as real code: git cat-file -s <commit>:<dir> succeeds on a tree and git show returns a tree listing, which is returned as file content. No blob-type check. Defeats non-negotiable 1; deriveExcerpts would hand a blind judge a directory listing as the cited code.",
+      "status": "open"
+    },
+    {
+      "id": "R2-04",
+      "lens": "correctness + security(quality)",
+      "summary": "leaklint never scans headings: narrativeText drops every /^\\s*#/ line before linting. Repo-derived module names (humanize of a directory slug) and feature names render as ## / ### headings, so banned technical vocabulary reaches business readers under a PASS certificate stating the opposite. Reproduced independently by two lenses.",
+      "verified_by_maker": "narrativeText filters heading lines; render.js:114/123 emit repo-derived names as headings.",
+      "status": "open — filter is correct for readability grading, wrong for leak lint; split the two"
+    },
+    {
+      "id": "R2-05",
+      "lens": "edge-cases",
+      "summary": "mergeTerrain renames a colliding surface id but never remaps the scanned modules' surface_ids, so a re-scan attributes modules to the wrong surface: guides/<a>.md documents another app's features and guides/<b>.md says nothing is live. Gate certifies PASS.",
+      "status": "open"
+    },
+    {
+      "id": "R2-06",
+      "lens": "edge-cases",
+      "summary": "OGMA's own fixed PRD preamble scores FK grade 11.68, above the default readability_max_grade of 10. Any repo with a short PRD (docs-only, or no LIVE features yet) FAILs readability on text the user did not write and cannot fix.",
+      "status": "open"
+    },
+    {
+      "id": "R2-07",
+      "lens": "edge-cases",
+      "summary": "map.md is in the out-contract (coverage requires it, push ships it) but excluded from buildDocuments, so the gate never byte-binds it and push exempts ^map\\. from the certified-hash check. A stale or hand-edited map.md survives PASS and ships.",
+      "status": "open"
+    },
+    {
+      "id": "R2-08",
+      "lens": "spec",
+      "summary": "The rendered PRD header promises 'Every claim in this document traces to verified code', but feature narration (does/happens/sees) — the bulk of the prose — carries no receipts and no witness; validateFeature requires neither. The over-claim is unlabelled in docs.",
+      "verified_by_maker": "validateFeature requires no receipts/witness field.",
+      "status": "open"
+    },
+    {
+      "id": "R2-09",
+      "lens": "spec",
+      "summary": "docs claim integrity fails an out/ file not in the document contract; gate's integrity block walks out/ only to parse annotations and never compares the walked set to outDocuments. An unlisted out/*.md certifies. Docs also attribute non-LIVE-absence to integrity (actually freshness) and claim 'no fact id is orphaned' with no fact->annotation direction implemented.",
+      "verified_by_maker": "integrity block read in full; outDocuments appears only in coverage and push.",
+      "status": "open"
+    },
+    {
+      "id": "R2-10",
+      "lens": "code",
+      "summary": "gate.js hardcodes 'prd.md' + re-derives the guide doc list twice (leaklint and readability), diverging from S.outDocuments, which gates prd.md on config.audiences.prd. With prd disabled a stale prd.md is still linted and graded despite being outside the certified fleet.",
+      "verified_by_maker": "gate.js:186-188 and 245-247 vs schema.js outDocuments.",
+      "status": "open"
+    },
+    {
+      "id": "R2-11",
+      "lens": "code + security(quality) + edge(quality)",
+      "summary": "Reads are unguarded while writes are guarded: gate's out/ walk uses statSync (follows symlinks, no cycle guard -> raw ELOOP), and render/ingest/watch readdir the facts dir with no refuseSymlink. A planted junction sources the Ogham from outside the repo or traverses the operator's filesystem. Reproduced by three lenses.",
+      "status": "open"
+    },
+    {
+      "id": "R2-12",
+      "lens": "code",
+      "summary": "Duplication of logic the codebase already owns: gate inlines the sha256 push.js:129 owns (encoding drift silently breaks every push); map.js reimplements render.js factIndex and narratable, and uses the prd-only narratable flag to gate the GUIDES view; MAX_REPORTED declared in both ingest.js and watch.js while schema.js owns every other cap.",
+      "status": "open"
+    },
+    {
+      "id": "R2-13",
+      "lens": "spec",
+      "summary": "README:43 states 'npm test # 227 checks'; actual is 248. Stale number introduced by the maker in Batch 10. README:37 also contradicts skill/SKILL.md on whether the independent review is done.",
+      "status": "open"
+    }
+  ],
+  "notable_quality": [
+    "push UPDATE path verifies only version/status/title, never re-reads the body, while CREATE does a full heading-presence read-back — a full-body rewrite is verified more weakly than a create, contradicting the file header's claim.",
+    "push.js:516 discards writeState's return value, then logs that the mapping was recorded even when validation refused to write it — next push creates duplicates.",
+    "graph indexTree applies no EXCLUDED_DIRS filter, so a vendored repo can consume the 10,000-file cap with node_modules before src, silently degrading every receipt to text-only verification under a PASS.",
+    "ogmaWrite is truncate-then-write with no temp+rename: a concurrent reader saw JSON parse errors on 613 of 925 reads.",
+    "PROSE_DENY bans backticks and control chars but not '<!--', so a feature name can author a forged fact annotation the gate then resolves and accepts.",
+    "localeCompare ordering contradicts the stated determinism of graph/index.json."
+  ],
+  "praised": [
+    "witnessInputHash length-prefixes every component and folds the version tag inside the hashed input — closes component-boundary forgery from repo-controlled bytes (correctness lens).",
+    "ogmaWrite as the sole symlink-refusing write primitive, verified live against a planted Windows junction (security lens).",
+    "Unicode NFC/NFD path handling correct on all three legs: read, hash, and diff (edge-cases lens).",
+    "The published proof artifacts survive recomputation: sample-prd.md hashes to the certificate's bound sha and every benchmark count reconciles (spec lens).",
+    "readOut's null contract is contained so an unreadable document always lands on pass=false rather than a green certificate (code lens)."
+  ],
+  "prior_rounds": [
+    ".zoilus/verdicts/2026-08-07-ship-panel.json (FAIL: security 3, correctness 4, edge 7, spec 7, code 7)",
+    ".zoilus/verdicts/2026-08-08-ship-panel.json (FAIL: spec 4, others 8-9)"
+  ]
+}

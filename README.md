@@ -34,13 +34,13 @@ then renders that one model for every audience:
 (`push`). The proof pass has run: a full pipeline execution against a public
 OSS fixture ending in a **PASS 10/10 certificate**, and a published witness
 catch rate — see [benchmarks/oss-fixture/benchmark.md](benchmarks/oss-fixture/benchmark.md).
-What remains before release: independent review and the final ship gate.
+What remains before release: the blind ship panel passing, then publication.
 `ogma --help` stays the honest per-power status board.
 
 ```
 npm install    # node >= 18; parsers are pure-WASM installs, no compiler
 node bin/ogma.js --help
-npm test       # 227 checks: validators, hostile shapes, e2e against real git repos
+npm test       # 250 checks: validators, hostile shapes, e2e against real git repos
 ```
 
 ## License
