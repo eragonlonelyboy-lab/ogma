@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- hero lands here once forged: ![Ogma carving glowing strokes into a standing stone while three listeners receive three different documents](assets/hero.png) -->
+![Ogma carving glowing strokes into a standing stone, chains of gold running from his tongue to three listeners, each holding a different document](assets/hero.png)
 
 # OGMA: One Graph, Many Audiences
 
