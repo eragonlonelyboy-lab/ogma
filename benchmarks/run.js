@@ -2365,6 +2365,7 @@ await pushChecks();
 await batch9Checks();
 await batch10Checks();
 await batch11Checks();
+await batch12Checks();
 
 // ---- batch 9: the ship-panel findings, each pinned -------------------------
 
@@ -2928,6 +2929,119 @@ async function batch11Checks() {
     // must read the flag for the audience being rendered, not the prd one.
     assert(/!f\.narratable\[audience\]/.test(mapSrc),
       'map.js answers the guides view with the prd narratable flag');
+  });
+}
+
+// ---- batch 12: the last two blocking findings -----------------------------
+
+async function batch12Checks() {
+  console.log('batch 12 (final blockers):');
+  const T = require('../lib/terrain');
+  const P = require('../lib/push');
+  const GATE = require('../lib/gate');
+  const R = require('../lib/render');
+  const M = require('../lib/map');
+
+  // R2-05 — a scanned surface whose id collides with an existing one is
+  // renamed (web -> web-2), but its MODULES still carried the old id, so they
+  // were re-attributed to whichever surface already owned the name. The guide
+  // for one app then documented the other app's features, under a PASS.
+  check('R2-05: a renamed surface keeps its own modules — a colliding id never steals them', () => {
+    const existing = {
+      surfaces: [{ id: 'web', kind: 'frontend', root: 'packages/web', entry_points: ['packages/web/package.json'], modules: [] }],
+      modules: [{ id: 'web-main', name: 'Web Main', surface_ids: ['web'], roots: ['packages/web/src'], summary: 'first app' }],
+      languages: { js: 10 }
+    };
+    // A second app at a DIFFERENT root whose basename slugs to the same id.
+    const scanned = {
+      surfaces: [
+        { id: 'web', kind: 'frontend', root: 'packages/web', entry_points: ['packages/web/package.json'], modules: [] },
+        { id: 'web', kind: 'frontend', root: 'apps/web', entry_points: ['apps/web/package.json'], modules: [] }
+      ],
+      modules: [
+        { id: 'web-main', name: 'Web Main', surface_ids: ['web'], roots: ['packages/web/src'], summary: 'first app' },
+        { id: 'web-main', name: 'Web Main', surface_ids: ['web'], roots: ['apps/web/src'], summary: 'second app' }
+      ],
+      languages: { js: 20 }
+    };
+    const { terrain } = T.mergeTerrain(existing, scanned);
+    const byRoot = new Map(terrain.surfaces.map(s => [s.root, s.id]));
+    assert(byRoot.get('apps/web') && byRoot.get('apps/web') !== byRoot.get('packages/web'),
+      'the colliding surface was not given its own id: ' + JSON.stringify(terrain.surfaces));
+    for (const m of terrain.modules) {
+      for (const root of m.roots) {
+        // The surface that actually contains this module's root.
+        const owner = terrain.surfaces
+          .filter(s => root === s.root || root.startsWith(s.root + '/'))
+          .sort((a, b) => b.root.length - a.root.length)[0];
+        assert(owner, `no surface contains ${root}`);
+        assert(m.surface_ids.includes(owner.id),
+          `module ${m.id} (${root}) is attributed to ${JSON.stringify(m.surface_ids)} but its root lives under ${owner.id}`);
+      }
+    }
+    // And the second app's module must exist at all — it used to be dropped
+    // or misfiled, leaving its surface with zero modules.
+    const second = terrain.modules.find(m => m.roots.includes('apps/web/src'));
+    assert(second, 'the second app produced no module at all');
+    assert(second.surface_ids.includes(byRoot.get('apps/web')),
+      'the second app module is not attached to its own surface');
+  });
+
+  // R2-07 (decided: option A) — the dashboard is a view over the certificate,
+  // so the gate that produces the verdict cannot byte-bind the document that
+  // displays it. It used to ship anyway, with its hash check skipped: the one
+  // delivered document nobody could vouch for. It is now local-only.
+  await checkAsync('R2-07: the dashboard is never delivered, and every document that IS delivered is certificate-bound', async () => {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'fixture ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'fixture render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'fixture map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'fixture did not certify');
+
+    const fleet = P.loadCertifiedFleet(b.dir);
+    assert(!fleet.error, 'fleet did not load: ' + fleet.error);
+    assert(!fleet.files.some(f => /^map\./.test(f.path)),
+      'the dashboard is still in the delivered fleet: ' + fleet.files.map(f => f.path).join(', '));
+    assert(fleet.files.length > 0, 'nothing at all would be delivered');
+
+    // Every remaining document must be named by the certificate — the
+    // exemption is gone, not merely narrowed.
+    const cert = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/certificate.json'), 'utf8'));
+    const certified = new Set(cert.documents.map(d => d.path));
+    for (const f of fleet.files) {
+      assert(certified.has(f.path), `${f.path} would ship without being named in the certificate`);
+    }
+
+    // The dashboard still exists locally and is still required by the
+    // contract — local-only is not the same as deleted.
+    assert(fs.existsSync(path.join(b.dir, '.ogma/out/map.md')), 'map.md stopped being written locally');
+    const readAt = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert(S.outDocuments(readAt(path.join(b.dir, '.ogma/config.json')),
+      readAt(path.join(b.dir, '.ogma/ogham/terrain.json'))).includes('map.md'),
+      'map.md fell out of the document contract, so coverage and integrity stopped requiring it');
+
+    // A hand-edited dashboard must not be able to ship, because it does not
+    // ship at all — and it must not break the push either.
+    fs.writeFileSync(path.join(b.dir, '.ogma/out/map.md'), '# tampered\n');
+    const after = P.loadCertifiedFleet(b.dir);
+    assert(!after.error, 'a tampered local dashboard broke the push: ' + after.error);
+    assert(!after.files.some(f => /^map\./.test(f.path)), 'the tampered dashboard entered the fleet');
+  });
+
+  // The other half of option A: a tampered DELIVERABLE still refuses. The
+  // exemption removal must not have loosened anything.
+  await checkAsync('R2-07: a document edited after the gate still refuses to ship', async () => {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'fixture ingest failed');
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'fixture render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'fixture map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'fixture did not certify');
+    fs.appendFileSync(path.join(b.dir, '.ogma/out/questions.md'), '\nsneaked in\n');
+    const fleet = P.loadCertifiedFleet(b.dir);
+    assert(fleet.error && /changed after the gate ran/.test(fleet.error),
+      'an edited deliverable was accepted: ' + JSON.stringify(fleet.error));
   });
 }
 
