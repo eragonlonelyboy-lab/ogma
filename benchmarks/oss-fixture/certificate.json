@@ -2,7 +2,7 @@
   "certificate_version": 1,
   "project": "fixture-ms",
   "commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
-  "generated_at": "2026-08-08T04:34:24Z",
+  "generated_at": "2026-08-08T06:34:05Z",
   "pass": true,
   "checks": [
     {
@@ -23,7 +23,7 @@
     {
       "check": "leaklint",
       "pass": true,
-      "detail": "no technical vocabulary reached non-technical readers"
+      "detail": "none of the 35 banned terms appear in business or guide output"
     },
     {
       "check": "complete",

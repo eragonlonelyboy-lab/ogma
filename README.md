@@ -9,7 +9,7 @@ for the script the Celtic god of eloquence carved so knowledge could persist —
 then renders that one model for every audience:
 
 - **Engineers** get implementation notes: module chains, safe vs. risky change points
-- **Business readers** get a feature-first PRD in plain language — zero technical vocabulary, enforced by lint, not by hope
+- **Business readers** get a feature-first PRD in plain language, linted against a list of technical terms rather than left to good intentions (a word list, not a guarantee of plainness)
 - **End users** get click-by-click guides per app surface
 - **Everyone** gets a dashboard and an open-questions ledger where ambiguity is filed with an ID instead of papered over
 
@@ -40,7 +40,7 @@ What remains before release: the blind ship panel passing, then publication.
 ```
 npm install    # node >= 18; parsers are pure-WASM installs, no compiler
 node bin/ogma.js --help
-npm test       # 250 checks: validators, hostile shapes, e2e against real git repos
+npm test       # 260 checks: validators, hostile shapes, e2e against real git repos
 ```
 
 ## License
