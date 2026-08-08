@@ -86,12 +86,23 @@ function main(argv) {
 // exitCode, not process.exit: exit() discards queued stdout on pipes.
 // A handler may be async (the graph indexer's engine loads WebAssembly);
 // a rejected promise is a defect surfaced honestly, never a silent 0.
-const result = main(process.argv);
+// A synchronous handler that throws (a symlink-guarded write refusing, a
+// renderer bug) must surface as an honest one-line failure, never a raw stack
+// dump. The async branch already has its rejection path; the sync call needs
+// the same guard around it.
+let result;
+try {
+  result = main(process.argv);
+} catch (err) {
+  console.error(`ogma failed: ${err.message}`);
+  process.exitCode = 1;
+  result = undefined;
+}
 if (result && typeof result.then === 'function') {
   result.then(
     code => { process.exitCode = code; },
     err => { console.error(`ogma failed: ${err.message}`); process.exitCode = 1; }
   );
-} else {
+} else if (result !== undefined) {
   process.exitCode = result;
 }

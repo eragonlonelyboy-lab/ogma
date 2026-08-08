@@ -1,0 +1,32 @@
+{
+  "date": "2026-08-08",
+  "artifact": "ogma @ 1120a90",
+  "panel": "ship gate (CHI-R140 single blind panel on finished product)",
+  "verdict": "FAIL",
+  "confidence": 0.94,
+  "bar": 8,
+  "rule": "no averaging; one lens below bar sinks the verdict",
+  "lenses": [
+    { "lens": "correctness", "score": 9, "pass": true, "blocking": 0 },
+    { "lens": "security",    "score": 8, "pass": true, "blocking": 0 },
+    { "lens": "edge-cases",  "score": 8, "pass": true, "blocking": 0 },
+    { "lens": "code",        "score": 8, "pass": true, "blocking": 0 },
+    { "lens": "spec",        "score": 4, "pass": false, "blocking": 2 }
+  ],
+  "blocking_findings": [
+    {
+      "id": "SPEC-01",
+      "lens": "spec",
+      "summary": "Published benchmark certificate is the Batch-8 artifact (9 checks, no documents field); shipped Batch-9 gate emits 10 checks + documents and validateCertificate REQUIRES all 10 + documents array, so the current binary cannot reproduce its own published proof. The freshness check (the SHIP-01 fix) has no published passing evidence on the OSS fixture.",
+      "evidence": "benchmarks/oss-fixture/certificate.json has 9 checks, no documents; lib/schema.js:898 requires seen.size===GATE_CHECKS.length (10); GATE_CHECKS includes 'freshness'; schema.js:912 requires documents array."
+    },
+    {
+      "id": "SPEC-02",
+      "lens": "spec",
+      "summary": "README internally contradictory: line 22 'ten deterministic checks' + 'binds certified document bytes' vs line 35 'PASS 9/9 certificate'. A reader cannot tell whether the certificate has 9 or 10 checks.",
+      "evidence": "README.md:22 vs README.md:33-35; docs/ogham-schema.md:277-288 lists ten checks + documents."
+    }
+  ],
+  "prior_round": ".zoilus/verdicts/2026-08-07-ship-panel.json (FAIL: security 3, correctness 4, edge 7, spec 7, code 7)",
+  "note": "Four lenses now pass (was two failing at 3 and 4). The single remaining FAIL is proof-artifact + docs staleness after Batch 9 added the 10th check, not a code defect. Quality findings (non-blocking) folded into the fix batch: cmdMap missing try/catch (code), cmdGraph empty-repo error leak (edge), escapeXml single-quote (security), push provenance covers only config/push-state (security defense-in-depth), deriveExcerpts over-EOF label (edge/witness), push version-guard TypeError (edge), gitHead idiom duplicated 4x (code), sameCommit prefix-match (correctness/edge)."
+}

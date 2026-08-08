@@ -32,7 +32,7 @@ then renders that one model for every audience:
 (`init`/`terrain`/`graph`/`ingest`), render (`prd`/`explain`/`guides`/
 `questions`/`map`), certify (`gate`), stay current (`watch`), deliver
 (`push`). The proof pass has run: a full pipeline execution against a public
-OSS fixture ending in a **PASS 9/9 certificate**, and a published witness
+OSS fixture ending in a **PASS 10/10 certificate**, and a published witness
 catch rate — see [benchmarks/oss-fixture/benchmark.md](benchmarks/oss-fixture/benchmark.md).
 What remains before release: independent review and the final ship gate.
 `ogma --help` stays the honest per-power status board.

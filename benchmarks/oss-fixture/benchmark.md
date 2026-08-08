@@ -8,7 +8,8 @@ catch-rate measurement the README's Witness row points at.
   used duration-conversion library — small enough for a complete, honest
   read; real enough to exercise every stage.
 - **Fixture commit:** `4ff48cec099f0514c3e9bbca18706c9c21122bfb`
-- **Run date:** 2026-08-07 · OGMA v0.0.2
+- **Run date:** 2026-08-07 · certificate regenerated 2026-08-08 with the
+  ten-check binary (adds `freshness` + certified document byte-binding)
 - **Witness checker:** one fresh-context blind subagent per statement
   (Claude), shown ONLY the statement and the excerpts derived by
   `lib/witness.js` — never the reader's reasoning, never the rest of the
@@ -19,9 +20,12 @@ catch-rate measurement the README's Witness row points at.
 `init → terrain → graph → read protocol (sweeps, classification, blind
 witness) → ingest → prd/explain/guides/questions → map → gate`
 
-**Certificate: PASS, 9/9 checks** — [certificate.json](certificate.json).
-The Ogham: 1 module, 3 features, 10 facts (9 LIVE, 1 UNCLEAR), 1 open ledger
-question. The UNCLEAR fact and its question are the honesty ledger working:
+**Certificate: PASS, 10/10 checks** — [certificate.json](certificate.json).
+The tenth check, `freshness`, proves the manifest sits at HEAD and rebuilds
+every renderer-owned document to byte-compare it against what shipped; the
+certificate records each certified document with its sha256. The Ogham: 1
+module, 3 features, 10 facts (9 LIVE, 1 UNCLEAR), 1 open ledger question.
+The UNCLEAR fact and its question are the honesty ledger working:
 the fixture's unknown-unit guard sits behind a pattern that admits only known
 units, so the read filed the reachability doubt instead of narrating it away
 ([facts-duration.json](facts-duration.json), `FACT-duration-010` / `Q-001`).

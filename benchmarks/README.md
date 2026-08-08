@@ -28,7 +28,7 @@ Runner: `benchmarks/run.js` (`npm test`). Grows with each batch; hardens at ship
 - **Receipt verifier bench** — planned (Batch 2): planted fake citations (wrong
   file, wrong line beyond drift window, absent symbol) are all rejected; valid
   citations pass.
-- **Gate bench** — planned (Batch 5): each of the nine checks fails on a
+- **Gate bench** — planned (Batch 5): each of the ten checks fails on a
   fixture built to violate exactly that check, and passes on the clean fixture.
 - **End-to-end fixture** — planned (Batch 8): a small public open-source repo;
   the full pipeline runs and the emitted certificate is published with the

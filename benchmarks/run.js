@@ -707,7 +707,7 @@ check('control characters in attacker-controlled fields are escaped in errors', 
     }
     return false;
   };
-  const spoof = String.fromCharCode(27) + "[2K" + String.fromCharCode(13) + "ok    all nine checks PASS";
+  const spoof = String.fromCharCode(27) + "[2K" + String.fromCharCode(13) + "ok    all ten checks PASS";
   const runs = [
     () => errorsOf(S.validateFact, fact({ classification: spoof })),
     () => errorsOf(S.validateFact, fact({ kind: spoof })),
@@ -1602,7 +1602,7 @@ async function renderChecks() {
   });
 }
 
-// ---- gate: nine checks and the certificate --------------------------------
+// ---- gate: ten checks and the certificate ---------------------------------
 
 async function gateChecks() {
   console.log('gate:');
@@ -2354,6 +2354,7 @@ await watchChecks();
 await debtChecks();
 await pushChecks();
 await batch9Checks();
+await batch10Checks();
 
 // ---- batch 9: the ship-panel findings, each pinned -------------------------
 
@@ -2542,6 +2543,195 @@ async function batch9Checks() {
     assert(cmdTerrain(dir2, m => m2.push(m)) === 1, 'terrain wrote a terrain with zero surfaces');
     assert(m2.join(' ').includes('nothing citable'), 'uncitable refusal is not honest: ' + m2.join(' | '));
     assert(!m2.join(' ').includes('surfaces must be'), 'the validator leaked into the user-facing answer');
+  });
+}
+
+// ---- batch 10: the 2026-08-08 ship-panel findings, each pinned -------------
+
+async function batch10Checks() {
+  console.log('batch 10 (ship-panel round 2):');
+  const P = require('../lib/push');
+  const GATE = require('../lib/gate');
+  const R = require('../lib/render');
+  const M = require('../lib/map');
+  const G10 = require('../lib/graph');
+  const U = require('../lib/util');
+
+  async function ingested10() {
+    const b = await buildWholeOgham();
+    assert(cmdIngest(b.dir, quiet) === 0, 'b10 fixture: ingest failed');
+    return b;
+  }
+  async function certified10() {
+    const b = await ingested10();
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'b10 fixture: render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'b10 fixture: map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'b10 fixture: gate failed');
+    return b;
+  }
+
+  // F2 — map was the one handler with no try/catch, and bin ran the sync path
+  // unguarded: a write refusal escaped as a raw stack instead of a sentence.
+  await checkAsync('F2: a map write that cannot proceed fails as a sentence, not a thrown stack', async () => {
+    const b = await ingested10();
+    // A directory where the document belongs makes the guarded write throw —
+    // the same shape a repo-planted symlink produces, without needing symlink
+    // privileges on the test machine.
+    fs.mkdirSync(path.join(b.dir, '.ogma/out/map.md'), { recursive: true });
+    const msgs = [];
+    let threw = null;
+    let code;
+    try { code = M.cmdMap(b.dir, m => msgs.push(m)); } catch (e) { threw = e; }
+    assert(threw === null, `cmdMap threw instead of returning: ${threw && threw.message}`);
+    assert(code === 1, `expected exit 1, got ${code}`);
+    assert(msgs.join(' ').includes('ogma map failed'), 'the failure was not reported in the house form: ' + msgs.join(' | '));
+  });
+  check('F2: bin guards the synchronous handler path, so no handler can dump a raw stack', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'bin', 'ogma.js'), 'utf8');
+    // The sync call must sit inside a try that reports and sets exit 1.
+    const guarded = /try\s*\{\s*result\s*=\s*main\(process\.argv\)/.test(src)
+      && /catch\s*\(\s*err\s*\)\s*\{[^}]*ogma failed/.test(src);
+    assert(guarded, 'bin/ogma.js calls main() outside a try/catch — a throwing handler dumps a stack');
+  });
+
+  // F3 — graph was the only entry point that leaked git internals on a repo
+  // with no commits; terrain and watch already translated the same condition.
+  await checkAsync('F3: graph on a commitless repo answers in English, never with git internals', async () => {
+    const dir = tmpdir();
+    fs.writeFileSync(path.join(dir, 'a.js'), 'const x = 1;\n');
+    gitIn(dir, ['init', '-q']);
+    assert(cmdInit(dir, quiet) === 0, 'init failed on a commitless repo');
+    const msgs = [];
+    assert(await G10.cmdGraph(dir, m => msgs.push(m)) === 1, 'graph did not refuse a commitless repo');
+    const said = msgs.join(' ');
+    assert(said.includes('not a git repository with commits'), 'the refusal is not the translated sentence: ' + said);
+    assert(!/rev-parse|fatal:|ambiguous argument/.test(said), 'git internals leaked to the user: ' + said);
+  });
+
+  // F4 — escapeXml left the single quote raw, so any future adapter emitting
+  // repo-derived text into an attribute would have been an injection point.
+  check('F4: escapeXml escapes both quote forms, so attribute contexts are safe too', () => {
+    const out = U.escapeXml(`a'b"c<d>e&f`);
+    assert(!out.includes("'"), 'single quote left raw — attribute injection stays open');
+    assert(out.includes('&#39;') && out.includes('&quot;') && out.includes('&lt;') && out.includes('&amp;'),
+      'expected all five escapes: ' + out);
+  });
+
+  // F5 — a review asked whether the provenance gate should refuse EVERY
+  // tracked .ogma/ file, since a hostile repo could ship its own
+  // certificate.json. It cannot authorize a push, and this pins why: the
+  // certificate must name the commit that CONTAINS it, and committing the
+  // file changes that commit's hash. The property is load-bearing (it is what
+  // lets the gate stay narrow enough not to break `git add -A`), so it is
+  // asserted here rather than left incidental.
+  await checkAsync('F5: a repo-shipped certificate can never authorize a push — it cannot name the commit that contains it', async () => {
+    const b = await certified10();
+    gitIn(b.dir, ['add', '-f', '.ogma/certificate.json']);
+    gitIn(b.dir, ['-c', 'user.email=bench@ogma.test', '-c', 'user.name=bench', 'commit', '-q', '-m', 'ship a certificate']);
+    const msgs = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => msgs.push(m)) === 1,
+      'a committed certificate was accepted as authorization');
+    const said = msgs.join(' ');
+    assert(/certificate is for .* but HEAD is/.test(said),
+      'the refusal is not the HEAD-binding one: ' + said.slice(0, 300));
+    // And the operator's own locally regenerated certificate still ships,
+    // tracked path or not — the gate must not punish an ordinary `git add -A`.
+    assert(await G10.cmdGraph(b.dir, quiet) === 0, 'b10 F5: re-graph failed');
+    const im = [];
+    assert(cmdIngest(b.dir, m => im.push(m)) === 0, 'b10 F5: re-ingest failed: ' + im.join(' | '));
+    assert(R.cmdPrd(b.dir, quiet) === 0 && R.cmdExplain(b.dir, quiet) === 0
+      && R.cmdGuides(b.dir, quiet) === 0 && R.cmdQuestions(b.dir, quiet) === 0, 'b10 F5: re-render failed');
+    assert(M.cmdMap(b.dir, quiet) === 0, 'b10 F5: re-map failed');
+    assert(GATE.cmdGate(b.dir, quiet) === 0, 'b10 F5: re-gate failed');
+    const m2 = [];
+    assert(await P.cmdPush(b.dir, ['--to', 'markdown-only'], m => m2.push(m)) === 0,
+      'a locally regenerated certificate was refused merely because its path is tracked: ' + m2.join(' | '));
+  });
+
+  // F6 — an excerpt whose end_line ran past EOF was labelled with the
+  // un-clamped range, so the blind judge saw a range wider than the bytes.
+  check('F6: an over-EOF citation is labelled with the clamped range it actually shows', () => {
+    const read = () => 'one\ntwo\nthree\n';
+    const d = W.deriveExcerpts([{ file: 'a.js', line: 1, end_line: 9999 }], read);
+    assert(!d.error, 'derivation failed: ' + d.error);
+    assert(d.excerpts[0].end_line === 3, `label overstates the excerpt: end_line ${d.excerpts[0].end_line}, file has 3 lines`);
+    assert(d.excerpts[0].code === 'one\ntwo\nthree', 'code no longer matches the label');
+  });
+
+  // F7 — a 200 whose body carried no version.number reached
+  // `.version.number` and threw a TypeError instead of an honest refusal.
+  await checkAsync('F7: a Confluence 200 with no version.number is refused, never guessed at', async () => {
+    const http = require('http');
+    // Honest for every CREATE (so the fleet reaches the seeded update), but
+    // page 500 — the one the seeded push-state maps — comes back WITHOUT a
+    // version block: a proxy or a drifted API shape.
+    const pages = new Map(); let nextId = 700;
+    const server = http.createServer((req, res) => {
+      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const u = new URL(req.url, 'http://x');
+        if (req.method === 'GET' && u.pathname === '/wiki/api/v2/spaces') return send(200, { results: [{ id: '9' }] });
+        if (req.method === 'POST' && u.pathname === '/wiki/api/v2/pages') {
+          const p = JSON.parse(body);
+          const id = String(nextId++);
+          pages.set(id, { id, title: p.title, status: 'current', version: { number: 1 }, body: p.body.value });
+          return send(200, { id, title: p.title });
+        }
+        const id = u.pathname.split('/').pop();
+        if (id === '500') return send(200, { id: '500', title: 'x', status: 'current' });   // no version block
+        const page = pages.get(id);
+        if (!page) return send(404, {});
+        if (u.searchParams.get('body-format') === 'storage') {
+          return send(200, { id: page.id, title: page.title, status: page.status, version: page.version, body: { storage: { value: page.body } } });
+        }
+        return send(200, { id: page.id, title: page.title, status: page.status, version: page.version });
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const env = {
+      CONFLUENCE_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+      CONFLUENCE_EMAIL: 'bench@ogma.test', CONFLUENCE_API_TOKEN: 'token'
+    };
+    try {
+      const b = await certified10();
+      const cert = JSON.parse(fs.readFileSync(path.join(b.dir, '.ogma/certificate.json'), 'utf8'));
+      // Seed a page mapping so the run takes the UPDATE path, with a sha that
+      // does not match the document so replay cannot skip it.
+      fs.writeFileSync(path.join(b.dir, '.ogma/push-state.json'), JSON.stringify({
+        push_state_version: S.PUSH_STATE_VERSION,
+        kind: 'confluence',
+        commit: cert.commit,
+        delivered_at: '2026-01-01T00:00:00Z',
+        files: [{ path: 'prd.md', sha256: '0'.repeat(64), page_id: '500' }]
+      }, null, 2) + '\n');
+      const msgs = [];
+      assert(await P.cmdPush(b.dir, ['--to', 'confluence', '--space', 'DOCS', '--parent', '1'], m => msgs.push(m), env) === 1,
+        'push reported success against a version-less API response');
+      const said = msgs.join(' ');
+      assert(said.includes('version.number'), 'the failure does not name the missing field: ' + said.slice(0, 300));
+      assert(!said.includes('TypeError') && !said.includes('undefined'),
+        'the failure surfaced as a JS error rather than a refusal: ' + said.slice(0, 300));
+    } finally {
+      server.close();
+    }
+  });
+
+  // F8 — the same four-line rev-parse idiom was hand-copied into ingest,
+  // watch, gate and push; drift there desynchronizes what "HEAD" means.
+  check('F8: gitHead is the one HEAD reader, and every caller uses it', () => {
+    const inRepo = U.gitHead(makeFixtureRepo({ 'a.js': 'x' }));
+    assert(!inRepo.error && /^[0-9a-f]{40}$/.test(inRepo.commit), 'gitHead did not return a full sha in a real repo');
+    const bare = U.gitHead(tmpdir());
+    assert(bare.error && !bare.commit, 'gitHead did not report an error outside a repository');
+    for (const f of ['ingest', 'watch', 'gate', 'push']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'lib', `${f}.js`), 'utf8');
+      assert(/gitHead\(/.test(src), `lib/${f}.js does not use the shared gitHead`);
+      assert(!/spawnSync\('git',\s*\[\s*'-C',\s*cwd,\s*'rev-parse'/.test(src),
+        `lib/${f}.js still hand-rolls the rev-parse idiom`);
+    }
   });
 }
 

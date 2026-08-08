@@ -2,7 +2,7 @@
   "certificate_version": 1,
   "project": "fixture-ms",
   "commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
-  "generated_at": "2026-08-07T05:47:27Z",
+  "generated_at": "2026-08-08T03:50:33Z",
   "pass": true,
   "checks": [
     {
@@ -49,6 +49,11 @@
       "check": "integrity",
       "pass": true,
       "detail": "bound to 4ff48cec099f, ids unique, annotations resolve"
+    },
+    {
+      "check": "freshness",
+      "pass": true,
+      "detail": "every fact current at 4ff48cec099f, every document matches the Ogham"
     }
   ],
   "counts": {
@@ -57,5 +62,19 @@
     "features": 3,
     "facts": 10,
     "ledger_open": 1
-  }
+  },
+  "documents": [
+    {
+      "path": "prd.md",
+      "sha256": "cf380d745e5ce8466606d26d2b112f1d9e6144a89fabf5d69fdf84717a1f7408"
+    },
+    {
+      "path": "questions.md",
+      "sha256": "3cf5add6cd47a08001fd866f97a9b62dfe208d1f5f2615c686f271b51c6e83cb"
+    },
+    {
+      "path": "tech/duration.md",
+      "sha256": "9879f8709cdd610bfa076a4e1e970567deee4c5c9febbc0cbab20c128ebcfe51"
+    }
+  ]
 }
